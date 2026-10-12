@@ -6,6 +6,12 @@
       "runtimeExecutable": "python",
       "runtimeArgs": ["-m", "http.server", "8765", "--directory", "C:/Users/alexe/Python/Game/design"],
       "port": 8765
+    },
+    {
+      "name": "game",
+      "runtimeExecutable": "C:/Program Files/nodejs/node.exe",
+      "runtimeArgs": ["tools/dev.mjs"],
+      "port": 5173
     }
   ]
 }

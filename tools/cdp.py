@@ -121,7 +121,8 @@ class WebSocket:
 
 
 class Browser:
-    def __init__(self, width=1280, height=900, dpr=1.0, mobile=False):
+    def __init__(self, width=1280, height=900, dpr=1.0, mobile=False, args=()):
+        """args: дополнительные ключи запуска браузера, например ('--disable-3d-apis',) чтобы отключить WebGL."""
         self.width, self.height, self.dpr, self.mobile = width, height, dpr, mobile
         self.profile = tempfile.mkdtemp(prefix='cdp-profile-')
         with socket.socket() as s:
@@ -131,7 +132,7 @@ class Browser:
             [find_browser(), '--headless=new', '--disable-gpu', '--hide-scrollbars', '--mute-audio',
              '--no-first-run', '--no-default-browser-check', '--disable-extensions',
              f'--remote-debugging-port={self.port}', f'--user-data-dir={self.profile}',
-             f'--window-size={width},{height}', 'about:blank'],
+             f'--window-size={width},{height}', *args, 'about:blank'],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         self.id = 0
         self.console = []      # (тип, текст): console.* и исключения
@@ -213,6 +214,10 @@ class Browser:
         self.cmd('Emulation.setDeviceMetricsOverride', width=w, height=h, deviceScaleFactor=dpr, mobile=mobile)
         if mobile:
             self.cmd('Emulation.setTouchEmulationEnabled', enabled=True, maxTouchPoints=5)
+
+    def add_init_script(self, js):
+        """Выполнить JS перед любым скриптом страницы (например, подставить свой YaGames)."""
+        self.cmd('Page.addScriptToEvaluateOnNewDocument', source=js)
 
     def open(self, url, timeout=30):
         self.cmd('Page.navigate', url=url)

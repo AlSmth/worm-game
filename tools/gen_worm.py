@@ -353,7 +353,11 @@ def main():
     js = ('window.WORM_GEOM = ' + json.dumps(GEOM) + ';\n'
           'window.WORM_VARIANTS = ' + json.dumps(chars, ensure_ascii=False) + ';\n')
     write(PREVIEW / 'worm-geometry.js', js)
-    print(f'worm: written {count} svg files + worm-geometry.js')
+    # то же для игры: единый источник чисел (design/worm/rig.json)
+    rig = dict(GEOM)
+    rig['skins'] = chars
+    write(WORM / 'rig.json', json.dumps(rig, ensure_ascii=False, indent=1) + '\n')
+    print(f'worm: written {count} svg files + worm-geometry.js + rig.json')
 
 
 if __name__ == '__main__':

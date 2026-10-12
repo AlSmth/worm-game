@@ -1,0 +1,23 @@
+{
+  "name": "worm-game",
+  "private": true,
+  "version": "0.1.0",
+  "description": "2D-игра про червя-монстра для Яндекс Игр",
+  "type": "module",
+  "scripts": {
+    "assets": "node tools/build-assets.mjs",
+    "dev": "node tools/dev.mjs",
+    "typecheck": "tsc --noEmit",
+    "build": "npm run assets && tsc --noEmit && vite build",
+    "pack": "npm run build && python tools/pack.py"
+  },
+  "dependencies": {
+    "phaser": "3.90.0"
+  },
+  "devDependencies": {
+    "@resvg/resvg-js": "2.6.2",
+    "pngjs": "7.0.0",
+    "typescript": "~5.9.3",
+    "vite": "^7.3.7"
+  }
+}

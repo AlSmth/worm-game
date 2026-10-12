@@ -293,7 +293,8 @@ def main():
     write(ROOT / 'design' / 'preview' / 'upgrades-geometry.js',
           'window.WING_TIERS = ' + json.dumps(info, ensure_ascii=False) + ';\n'
           'window.WING_CANVAS = ' + str(CANVAS) + ';\n')
-    print(f'upgrades: written {n} wing files (5 tiers x 2 layers) + upgrades-geometry.js')
+    write(WINGS / 'wings.json', json.dumps({'canvas': CANVAS, 'tiers': info}, ensure_ascii=False, indent=1) + '\n')
+    print(f'upgrades: written {n} wing files (5 tiers x 2 layers) + upgrades-geometry.js + wings.json')
 
 
 if __name__ == '__main__':

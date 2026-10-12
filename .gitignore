@@ -3,6 +3,10 @@ node_modules/
 dist/
 *.zip
 
+# создаётся при запуске и сборке: атласы из design/ (tools/build-assets.mjs), снимки и распакованный архив автопроверок
+public/assets/
+build/
+
 # Python
 __pycache__/
 *.pyc
