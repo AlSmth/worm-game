@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Превью дизайна: этап 1</title>
+<title>Превью дизайна: червь, крылья, добыча</title>
 <style>
   :root {
     --bg: #14161f; --panel: #1d2030; --panel2: #262a3f; --ink: #eef0f7; --muted: #9aa0b8;
@@ -27,7 +27,7 @@
              padding: 10px 0; display: flex; flex-wrap: wrap; gap: 10px 20px; align-items: center; }
   @media (min-height: 760px) { .toolbar { position: sticky; top: 0; z-index: 20; } }
   .toolbar label { display: flex; align-items: center; gap: 8px; font-size: 14px; }
-  .toolbar input[type=range] { width: 140px; accent-color: var(--accent); }
+  .toolbar input[type=range] { width: 130px; accent-color: var(--accent); }
   .toolbar .val { min-width: 2.4em; color: var(--accent); font-variant-numeric: tabular-nums; }
   .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
   .seg button { background: var(--panel); color: var(--ink); border: 0; padding: 7px 11px; cursor: pointer; font: inherit; font-size: 13px; }
@@ -36,14 +36,12 @@
 
   .tag { display: inline-grid; place-items: center; width: 34px; height: 34px; border-radius: 10px; background: var(--accent); color: #2b1b17; font-weight: 800; font-size: 18px; flex: none; }
 
-  .hd { position: relative; width: 100%; max-width: 230px; aspect-ratio: 1; margin: 0 auto; }
-  .hd img { position: absolute; left: 0; top: 0; width: 100%; height: 100%; display: block; }
-
   .pickrow { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 8px; }
   .pc { cursor: pointer; text-align: center; font: inherit; color: inherit; background: var(--panel);
         border: 2px solid var(--line); border-radius: 18px; padding: 12px 10px; transition: border-color .15s, transform .15s; }
   .pc:hover { border-color: #6b7398; transform: translateY(-2px); }
   .pc.sel { border-color: var(--accent); background: #2a2540; box-shadow: 0 0 0 3px rgba(255,176,32,.25); }
+  .pc canvas { width: 100%; max-width: 230px; aspect-ratio: 1; display: block; margin: 0 auto; }
   .pc .nm { display: flex; gap: 8px; align-items: center; justify-content: center; font-weight: 700; font-size: 18px; margin-top: 4px; }
   .pc .tr { display: block; font-size: 12px; color: var(--muted); margin: 4px 4px 10px; min-height: 3em; }
   .pc .go { display: inline-block; padding: 8px 24px; border-radius: 12px; font-weight: 700; color: #2b1b17;
@@ -59,40 +57,34 @@
   .card.sel .chosen { display: inline-block; }
   .info { padding: 0 16px; font-size: 12px; color: var(--muted); }
 
-  .stage { position: relative; height: 460px; margin: 8px 16px; border-radius: 12px; overflow: hidden; border: 2px solid #120b09; }
-  .mstage { position: relative; height: 270px; border-radius: 10px; overflow: hidden; border: 2px solid #120b09; }
+  canvas.stage { display: block; width: calc(100% - 32px); height: 460px; margin: 8px 16px; border-radius: 12px; border: 2px solid #120b09; }
+  canvas.mstage { display: block; width: 100%; height: 270px; border-radius: 10px; border: 2px solid #120b09; }
   .progrow { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 8px; }
   .pcell { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 8px 8px 10px; }
   .pcell .cap { display: flex; gap: 8px; align-items: center; margin: 2px 2px 6px; font-size: 13px; }
   .pcell .cap .lv { display: inline-grid; place-items: center; min-width: 26px; height: 26px; border-radius: 8px; background: var(--accent); color: #2b1b17; font-weight: 800; }
   .pcell .cap .lv.zero { background: var(--panel2); color: var(--muted); }
-  .stage.ground, .mstage.ground {
-    background:
+  .ground { background:
       radial-gradient(ellipse 70px 44px at 14% 30%, rgba(255,235,200,.10), transparent 70%),
       radial-gradient(ellipse 110px 60px at 72% 80%, rgba(0,0,0,.22), transparent 70%),
       radial-gradient(ellipse 60px 38px at 42% 88%, rgba(255,235,200,.08), transparent 70%),
-      linear-gradient(#7a5236, #5b3a29 45%, #3c2418 100%);
-  }
-  .stage.light, .mstage.light { background: linear-gradient(#d9f0ff, #f4fbff); }
-  .stage.dark, .mstage.dark { background: #0d0f1a; }
-  .wg { position: absolute; left: 0; top: 0; width: 0; height: 0; transform-origin: 0 0; }
-  .wg .wp { position: absolute; display: block; max-width: none; user-select: none; -webkit-user-drag: none; transform: rotate(var(--a, 0rad)); }
-  @keyframes flapF { 0%, 100% { transform: rotate(calc(var(--a) + 9deg)); } 50% { transform: rotate(calc(var(--a) - 20deg)); } }
-  @keyframes flapB { 0%, 100% { transform: rotate(calc(var(--a) + 14deg)); } 50% { transform: rotate(calc(var(--a) - 12deg)); } }
-  .wg .wp.fl-f { animation: flapF .9s ease-in-out infinite; }
-  .wg .wp.fl-b { animation: flapB .9s ease-in-out -.12s infinite; }
-  .wg .dot { position: absolute; width: 12px; height: 12px; margin: -6px 0 0 -6px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 0 0 1.5px #000; }
+      linear-gradient(#7a5236, #5b3a29 45%, #3c2418 100%); }
+  .light { background: linear-gradient(#d9f0ff, #f4fbff); }
+  .dark { background: #0d0f1a; }
 
   .strip { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; padding: 6px 16px 10px; }
   .strip figure { margin: 0; background: var(--panel2); border-radius: 10px; padding: 8px 6px 6px; text-align: center; }
-  .strip .hd { max-width: 150px; }
+  .strip canvas { width: 100%; max-width: 150px; aspect-ratio: 1; display: block; margin: 0 auto; }
   .strip figcaption { font-size: 12px; color: var(--muted); }
 
   .mini { display: flex; gap: 16px; align-items: flex-end; padding: 2px 16px 16px; flex-wrap: wrap; }
   .mini .sz { text-align: center; font-size: 11px; color: var(--muted); }
-  .mini .sz .hd { margin: 0 auto 3px; background: var(--panel2); border-radius: 6px; }
-  .mini .tiny { position: relative; width: 320px; height: 90px; background: var(--panel2); border-radius: 8px; overflow: hidden; }
+  .mini .sz canvas { display: block; margin: 0 auto 3px; background: var(--panel2); border-radius: 6px; }
+  .mini canvas.tiny { width: 320px; height: 90px; background: var(--panel2); border-radius: 8px; }
   .mini .lbl { font-size: 11px; color: var(--muted); margin-top: 3px; text-align: center; }
+
+  .preyrow { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; margin-top: 8px; }
+  .preyrow canvas { display: block; width: 100%; height: 190px; border-radius: 10px; border: 2px solid #120b09; }
 
   .boards { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
   .box { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 12px 16px 14px; }
@@ -105,14 +97,16 @@
   .sw span { display: block; font-size: 11px; color: var(--muted); margin-top: 2px; font-variant-numeric: tabular-nums; }
   .foot { margin-top: 28px; font-size: 13px; }
 
-  .solo header, .solo .pick, .solo .prog, .solo h3, .solo .boards, .solo .foot { display: none; }
-  .compact header, .compact .pick, .compact .prog, .compact h3, .compact .boards, .compact .foot,
+  .solo header, .solo .pick, .solo .prog, .solo .prey, .solo h3, .solo .boards, .solo .foot { display: none; }
+  .compact header, .compact .pick, .compact .prog, .compact .prey, .compact h3, .compact .boards, .compact .foot,
   .compact .strip, .compact .mini, .compact .info { display: none; }
   .compact .card { margin: 10px 0; }
+  .only-prog header, .only-prog .pick, .only-prog #variants, .only-prog .prey, .only-prog .boards, .only-prog .foot,
+  .only-prog .toolbar { display: none; }
 
   @media (max-width: 680px) {
     .strip { grid-template-columns: repeat(3, 1fr); }
-    .stage { height: 340px; }
+    canvas.stage { height: 340px; }
     .pickrow { gap: 8px; }
     .pc .tr { display: none; }
   }
@@ -121,20 +115,21 @@
 <body>
 <div class="wrap">
   <header>
-    <h1>Этап 1 · Персонажи и червь</h1>
-    <p>Три червя доступны игроку на выбор. Ползунками можно «вырастить» червя и проверить, как он выглядит при любой длине. Справа от головы стоит жук (добыча зоны 1) для сравнения масштаба. Крылья проверяют точки привязки: у всех трёх персонажей они совпадают.</p>
+    <h1>Червь, крылья и добыча</h1>
+    <p>Червь: гладкая трубка без соединений и две большие челюсти. <b>Размер челюсти определяет, какую добычу он может съесть.</b> Ползунками можно вырастить червя, раскрыть челюсти и проверить крылья: у всех трёх персонажей они совпадают. Справа от челюстей стоит жук (добыча зоны 1) для сравнения масштаба.</p>
   </header>
 
   <div class="toolbar" id="toolbar">
     <label>Длина <input type="range" id="segs" min="0" max="40" step="1" value="8"><span class="val" id="segsV">8</span></label>
     <label>Толщина <input type="range" id="thick" min="0.5" max="1.5" step="0.05" value="1"><span class="val" id="thickV">1.0</span></label>
+    <label>Челюсти <input type="range" id="jaw" min="0" max="100" step="1" value="53"><span class="val" id="jawV">53</span></label>
     <span class="seg" id="exprs"></span>
     <span class="seg" id="wingsSeg"></span>
-    <label><input type="checkbox" id="taper" checked> сужение к хвосту</label>
     <label><input type="checkbox" id="wave" checked> волна</label>
-    <label><input type="checkbox" id="beetle" checked> жук</label>
+    <label><input type="checkbox" id="prey" checked> добыча</label>
     <label><input type="checkbox" id="fit" checked> вписывать в экран</label>
     <label><input type="checkbox" id="flap" checked> взмах крыльев</label>
+    <label><input type="checkbox" id="folded"> под землёй (крылья сложены)</label>
     <label><input type="checkbox" id="anchors"> точки привязки</label>
     <span class="seg" id="bgs">
       <button data-bg="ground" class="on">Земля</button><button data-bg="light">Светлый</button><button data-bg="dark">Тёмный</button>
@@ -150,8 +145,14 @@
 
   <section class="prog">
     <h3>Прокачка прыжка: крылья</h3>
-    <p>По умолчанию у червя крыльев нет. Первое улучшение прыжка открывает крылья, каждое следующее делает их больше и круче (всего 5 ступеней). Показан выбранный персонаж. Броня (за здоровье) и чешуя (за скорость) появятся на этапе 4.</p>
+    <p>По умолчанию у червя крыльев нет. Первое улучшение прыжка открывает крылья, каждое следующее делает их больше и круче: жук, птица, светлые, тёмные, золотой дракон. Показан выбранный персонаж. Броня (чешуя, затем рога) и гребень за скорость появятся на этапе 4.</p>
     <div class="progrow" id="prog"></div>
+  </section>
+
+  <section class="prey">
+    <h3>Добыча зоны 1: вид сверху</h3>
+    <p>Насекомые ползают по земле и оставляют за собой небольшой след. Второй вид добычи — червячок. В игре размер и оттенок меняются кодом.</p>
+    <div class="preyrow" id="preyrow"></div>
   </section>
 
   <section id="variants"></section>
@@ -165,15 +166,15 @@
         <li><b>Заливка:</b> основной тон, тень и блик; мягкий градиент для «глянцевого» объёма.</li>
         <li><b>Свет:</b> сверху; блик белой полупрозрачной формой.</li>
         <li><b>Цвет:</b> яркий и чистый; силуэт читается на любом фоне.</li>
-        <li><b>Формы:</b> круглые, «резиновые», крупная голова.</li>
-        <li><b>Лица:</b> большие глаза с бликами, озорной вид. Без крови и страшных деталей.</li>
+        <li><b>Формы:</b> круглые, «резиновые»; червь — гладкая трубка с большими челюстями.</li>
+        <li><b>Лица:</b> большие глаза с бликами, озорной вид. Зубцы крупные и тупые, без крови и страшных деталей.</li>
         <li><b>Текста в рисунках нет:</b> подписи рисует игра.</li>
       </ul>
     </div>
     <div class="box" id="palettes"><h4>Палитры</h4></div>
   </div>
 
-  <p class="foot">Это страница для просмотра, в игру она не попадает. Червей создаёт скрипт <code>tools/gen_worm.py</code>, крылья <code>tools/gen_upgrades.py</code>. В адресе можно задать состояние: <code>?segs=20&amp;expr=open&amp;wings=1&amp;anchors=1&amp;pick=plum</code>.</p>
+  <p class="foot">Это страница для просмотра, в игру она не попадает. Червей создаёт скрипт <code>tools/gen_worm.py</code>, крылья <code>tools/gen_upgrades.py</code>, добычу <code>tools/gen_prey.py</code>. В адресе можно задать состояние: <code>?segs=20&amp;expr=open&amp;jaw=80&amp;wings=3&amp;anchors=1&amp;pick=plum</code>.</p>
 </div>
 
 <script src="worm-geometry.js"></script>
@@ -181,180 +182,222 @@
 <script>
 (function () {
   'use strict';
-  var G = window.WORM_GEOM, VARS = window.WORM_VARIANTS;
+  var G = window.WORM_GEOM, VARS = window.WORM_VARIANTS, WT = window.WING_TIERS || [], WC = window.WING_CANVAS || 768;
   var BUST = Date.now();
-  var EXPRS = [['idle', 'Спокойный'], ['open', 'Бросок'], ['chomp', 'Жуёт'], ['hurt', 'Оглушён'], ['happy', 'Рад']];
-  var st = { segs: 8, thick: 1, expr: 'idle', taper: true, wave: true, beetle: true, fit: true, bg: 'ground',
-             wings: 0, anchors: false, flap: true, pick: null };
-  var BEETLE = '../zone-1-underground/food/z1-beetle.svg?v=' + BUST;
-  var WL = [0];   // длина крыла по ступеням (px при масштабе 1:1)
-  (window.WING_TIERS || []).forEach(function (t) { WL[t.tier] = t.L; });
+  var EXPRS = [['idle', 'Спокойный', 0.53], ['open', 'Бросок', 1], ['chomp', 'Жуёт', 0], ['hurt', 'Оглушён', 0.1], ['happy', 'Рад', 0.8]];
+  var PREY = ['z1-beetle-a', 'z1-beetle-b', 'z1-worm-a', 'z1-worm-b'];
+  var FAR_SCALE = 0.86;
+  var st = { segs: 8, thick: 1, jaw: 0.53, expr: 'idle', wave: true, prey: true, fit: true, bg: 'ground',
+             wings: 0, anchors: false, flap: true, folded: false, pick: null };
+  var IMG = {};
+  var T = 0;
+
+  function $(id) { return document.getElementById(id); }
+  function byId(id) { return VARS.filter(function (v) { return v.id === id; })[0]; }
+  function wurl(id, name) { return '../worm/' + id + '/worm-' + id + '-' + name + '.svg?v=' + BUST; }
+  function uurl(name) { return '../upgrades/wings/' + name + '.svg?v=' + BUST; }
+  function purl(name) { return '../zone-1-underground/food/' + name + '.svg?v=' + BUST; }
   function wingName(t) {
-    var w = (window.WING_TIERS || []).filter(function (x) { return x.tier === t; })[0];
+    var w = WT.filter(function (x) { return x.tier === t; })[0];
     return w ? 'крылья ' + t + ': ' + w.name : '';
   }
 
-  function wurl(id, name) { return '../worm/' + id + '/worm-' + id + '-' + name + '.svg?v=' + BUST; }
-  function uurl(name) { return '../upgrades/wings/' + name + '.svg?v=' + BUST; }
-  function $(id) { return document.getElementById(id); }
-  function byId(id) { return VARS.filter(function (v) { return v.id === id; })[0]; }
-
-  // голова с макушкой (макушка лежит под головой) одним блоком
-  function headHTML(v, expr, px) {
-    var st2 = px ? ' style="width:' + px + 'px"' : '';
-    return '<div class="hd"' + st2 + '>' + (v.crown ? '<img alt="" src="' + wurl(v.id, 'crown') + '">' : '') +
-      '<img alt="" src="' + wurl(v.id, 'head-' + expr) + '"></div>';
-  }
-
-  // Раскладка узлов червя вдоль волнистой линии; голова в (0, 0), хвост уходит влево.
-  function layout(segs, thick, taper, wave) {
-    var total = segs + 2;
-    var sc = function (i) { return thick * (taper ? 1 - 0.45 * Math.pow(i / Math.max(1, total - 1), 1.25) : 1); };
-    var amp = wave ? 26 : 0, wl = 380;
-    var yAt = function (x) { return amp * Math.sin(x / wl * Math.PI * 2); };
-    var nodes = [{ x: 0, y: yAt(0) }];
-    for (var i = 1; i < total; i++) {
-      var prev = nodes[i - 1];
-      var base = i === 1 ? G.headToBead : (i === total - 1 ? G.beadToTail : G.beadStep);
-      var d = base * (sc(i - 1) + sc(i)) / 2;
-      var x = prev.x;
-      while (Math.hypot(x - prev.x, yAt(x) - prev.y) < d) { x -= 0.5; }
-      nodes.push({ x: x, y: yAt(x) });
-    }
-    nodes.forEach(function (n, i) { n.s = sc(i); n.a = Math.atan2(yAt(n.x + 1) - yAt(n.x - 1), 2); });
-    return nodes;
-  }
-
-  function put(g, src, size, x, y, rot, cls) {
-    var img = new Image();
-    img.alt = ''; img.draggable = false; img.className = 'wp' + (cls ? ' ' + cls : ''); img.src = src;
-    img.style.cssText = 'width:' + size + 'px;height:' + size + 'px;left:' + (x - size / 2) + 'px;top:' + (y - size / 2) +
-      'px;--a:' + (rot || 0) + 'rad';
-    g.appendChild(img);
-  }
-
-  // мировая позиция точки привязки части: центр части + смещение, повёрнутое и промасштабированное вместе с ней
-  function anchor(n, off) {
-    var c = Math.cos(n.a), s = Math.sin(n.a);
-    return { x: n.x + (off[0] * c - off[1] * s) * n.s, y: n.y + (off[0] * s + off[1] * c) * n.s };
-  }
-
-  function dot(g, p, color) {
-    var d = document.createElement('div');
-    d.className = 'dot';
-    d.style.cssText = 'left:' + p.x + 'px;top:' + p.y + 'px;background:' + color;
-    g.appendChild(d);
-  }
-
-  function draw(stage, v, o) {
-    Array.prototype.slice.call(stage.querySelectorAll('.wg')).forEach(function (n) { n.remove(); });
-    var W = stage.clientWidth, H = stage.clientHeight;
-    var nodes = layout(o.segs, o.thick, o.taper, o.wave);
-    var last = nodes.length - 1, tail = nodes[last], head = nodes[0];
-    var wn = o.segs >= 1 ? nodes[Math.min(G.wingBead, o.segs)] : null;
-    var wa = wn ? anchor(wn, G.anchors.wing) : null;
-    var minX = tail.x - 64 * tail.s, maxX = 100 * o.thick;
-    if (o.wings && wa) { minX = Math.min(minX, wa.x - 0.85 * WL[o.wings] * wn.s); }
-    if (o.beetle) { maxX += 230 * o.thick; }
-    var span = maxX - minX, f, ox;
-    if (o.forceScale) { f = o.forceScale; ox = W - 10 - maxX * f; }
-    else if (o.fit) { f = Math.min(1, (W - 40) / span); ox = 20 - minX * f + ((W - 40) - span * f) / 2; }
-    else { f = 1; ox = W - 20 - maxX; }
-    var g = document.createElement('div');
-    g.className = 'wg';
-    // с крыльями червь ниже центра сцены: крылья уходят вверх
-    g.style.transform = 'translate(' + ox + 'px,' + (H * (o.wings ? 0.64 : 0.5)) + 'px) scale(' + f + ')';
-
-    // порядок слоёв: дальнее крыло, хвост, сегменты (от хвоста к голове), ближнее крыло, макушка, голова
-    if (o.wings && wn) { put(g, uurl('wings-t' + o.wings + '-back'), window.WING_CANVAS * wn.s, wa.x, wa.y, wn.a, o.flap ? 'fl-b' : ''); }
-    put(g, wurl(v.id, 'tail'), G.segCanvas * tail.s, tail.x, tail.y, tail.a);
-    for (var i = o.segs; i >= 1; i--) {
-      put(g, wurl(v.id, i % 2 ? 'body-a' : 'body-b'), G.segCanvas * nodes[i].s, nodes[i].x, nodes[i].y, nodes[i].a);
-    }
-    if (o.wings && wn) { put(g, uurl('wings-t' + o.wings + '-front'), window.WING_CANVAS * wn.s, wa.x, wa.y, wn.a, o.flap ? 'fl-f' : ''); }
-    if (v.crown) { put(g, wurl(v.id, 'crown'), G.headCanvas * head.s, head.x, head.y, head.a); }
-    put(g, wurl(v.id, 'head-' + o.expr), G.headCanvas * head.s, head.x, head.y, head.a);
-    if (o.beetle) { put(g, BEETLE, 128 * 0.72 * o.thick, 175 * o.thick, 34 * o.thick, 0); }
-    if (o.anchors) {
-      dot(g, anchor(head, G.anchors.mouth), '#4DA3FF');
-      dot(g, anchor(head, G.anchors.helmet), '#FFD23F');
-      if (wa) { dot(g, wa, '#FF4D4D'); }
-    }
-    stage.appendChild(g);
-    return { f: f };
-  }
-
-  // ----- прокачка: клетки «без крыльев» и ступени 1..5 на выбранном персонаже -----
-  function renderProg() {
-    var v = byId(st.pick || 'plum');
-    var host = $('prog');
-    if (!host.children.length) {
-      var cells = '';
-      for (var t = 0; t <= 5; t++) {
-        cells += '<div class="pcell"><div class="cap"><span class="lv' + (t ? '' : ' zero') + '">' + t + '</span><span></span></div>' +
-          '<div class="mstage ground"></div></div>';
-      }
-      host.innerHTML = cells;
-    }
-    Array.prototype.forEach.call(host.children, function (cell, t) {
-      cell.querySelector('.cap span:last-child').textContent = t ? wingName(t).replace(/^крылья \d: /, '') : 'без крыльев (по умолчанию)';
-      var stage = cell.querySelector('.mstage');
-      stage.className = 'mstage ' + st.bg;
-      draw(stage, v, { segs: 7, thick: 1, expr: 'idle', taper: true, wave: false, beetle: false, fit: false,
-                       forceScale: 0.4, wings: t, anchors: false, flap: st.flap });
+  // ---------- загрузка картинок ----------
+  function loadAll(done) {
+    var list = [];
+    VARS.forEach(function (v) {
+      G.passes.map(function (n) { return 'stamp-' + n; }).concat(['jaw-top', 'jaw-bottom', 'maw'], EXPRS.map(function (e) { return 'face-' + e[0]; }))
+        .concat(v.crown ? ['crown'] : []).forEach(function (n) { list.push([v.id + '/' + n, wurl(v.id, n)]); });
+    });
+    WT.forEach(function (t) { ['back', 'front'].forEach(function (l) { list.push(['wing' + t.tier + l, uurl('wings-t' + t.tier + '-' + l)]); }); });
+    PREY.forEach(function (n) { list.push([n, purl(n)]); });
+    var left = list.length;
+    list.forEach(function (it) {
+      var im = new Image();
+      im.onload = im.onerror = function () { if (--left === 0) { done(); } };
+      im.src = it[1];
+      IMG[it[0]] = im;
     });
   }
 
-  // ----- выбор персонажа (макет) -----
-  function renderPick() {
-    $('pick').innerHTML = VARS.map(function (v) {
-      var on = st.pick === v.id;
-      return '<button class="pc' + (on ? ' sel' : '') + '" data-id="' + v.id + '">' +
-        headHTML(v, on ? 'happy' : 'idle') +
-        '<span class="nm"><span class="tag">' + v.tag + '</span>' + v.name + '</span>' +
-        '<span class="tr">' + v.note + '</span><span class="go">' + (on ? 'Выбран ✓' : 'Выбрать') + '</span></button>';
-    }).join('');
-    $('pickInfo').textContent = st.pick ? 'Ваш червь: ' + byId(st.pick).name + '. Он останется с вами, пока вы не смените его в меню.'
-                                        : 'Нажмите на червя, чтобы выбрать.';
-    VARS.forEach(function (v) { $('card-' + v.id).classList.toggle('sel', st.pick === v.id); });
-    renderProg();
+  // ---------- путь тела и профиль радиуса (те же формулы, что в игре, src/game/Worm.ts) ----------
+  function makePath(len, wave) {
+    var amp = wave ? 26 : 0, wl = 380, pts = [], x, acc = 0;
+    function yAt(xx) { return amp * Math.sin(xx / wl * Math.PI * 2); }
+    var prev = { x: 0, y: yAt(0), s: 0 };
+    pts.push(prev);
+    for (x = -1.5; x > -len - 1.5; x -= 1.5) {
+      var p = { x: x, y: yAt(x) };
+      acc += Math.hypot(p.x - prev.x, p.y - prev.y);
+      p.s = acc; pts.push(p); prev = p;
+    }
+    return {
+      at: function (d) {
+        var lo = 0, hi = pts.length - 1;
+        while (hi - lo > 1) { var m = (lo + hi) >> 1; if (pts[m].s < d) { lo = m; } else { hi = m; } }
+        var a = pts[lo], b = pts[hi], t = b.s > a.s ? (d - a.s) / (b.s - a.s) : 0;
+        var xx = a.x + (b.x - a.x) * t;
+        return { x: xx, y: yAt(xx), a: Math.atan2(yAt(xx + 1) - yAt(xx - 1), 2) };
+      }
+    };
   }
 
-  // ----- каркас страницы -----
+  function radius(d, L) {
+    var r = G.bodyRadius;
+    if (d < G.headBulge) { var u = d / G.headBulge; u = u * u * (3 - 2 * u); r = G.headRadius + (G.bodyRadius - G.headRadius) * u; }
+    var ts = G.taperFrom * L;
+    if (d > ts && L > ts) { var w = (d - ts) / (L - ts); w = w * w * (3 - 2 * w); r += (G.tailRadius - r) * w; }
+    return r;
+  }
+
+  function rot(p, a, k) { var c = Math.cos(a), s = Math.sin(a); return { x: (p[0] * c - p[1] * s) * (k || 1), y: (p[0] * s + p[1] * c) * (k || 1) }; }
+
+  function drawRot(ctx, im, size, x, y, a, flipY) {
+    if (!im || !im.complete || !im.naturalWidth) { return; }
+    ctx.save(); ctx.translate(x, y); ctx.rotate(a); if (flipY) { ctx.scale(1, -1); }
+    ctx.drawImage(im, -size / 2, -size / 2, size, size);
+    ctx.restore();
+  }
+  function dot(ctx, x, y, col) {
+    ctx.beginPath(); ctx.arc(x, y, 6, 0, 6.2832); ctx.fillStyle = col; ctx.fill();
+    ctx.lineWidth = 2; ctx.strokeStyle = '#fff'; ctx.stroke();
+  }
+
+  // Рисует червя в единицах дизайна (масштаб 1:1); положение и масштаб задаёт ctx.
+  // o: {segs, wave, jaw 0..1, expr, wings, folded, flap, anchors, prey, t}
+  function drawWorm(ctx, v, o) {
+    var Lb = Math.max(1, o.segs * G.step), path = makePath(Lb + 200, o.wave);
+    var sp = G.spacing, K = Math.max(1, Math.ceil(Lb / sp));
+    var st0 = [], k, d, p, r;
+    for (k = 0; k <= K; k++) { d = Math.min(k * sp, Lb); p = path.at(d); st0.push({ x: p.x, y: p.y, r: radius(d, Lb) }); }
+    var head = path.at(0), ha = head.a;
+    var img = function (n) { return IMG[v.id + '/' + n]; };
+    var S = G.stampCanvas;
+
+    // крылья: якорь на спине в wingDist от головы
+    var wd = Math.min(G.wingDist, Lb * 0.85), wp = path.at(wd), wo = rot(G.anchors.wing, wp.a);
+    var wx = wp.x + wo.x, wy = wp.y + wo.y;
+    var fold = o.folded ? 1 : 0;
+    var amp = o.folded ? 0.14 : 0.38, ph = o.flap ? o.t * (o.folded ? 6 : 16) : 0.9;
+    var kk = 1 - 0.4 * fold, foldRot = -0.85 * fold;
+    var offF = amp * (Math.sin(ph) * 0.5 - 0.1) + foldRot, offB = amp * (Math.sin(ph - 0.7) * 0.5 - 0.1) + foldRot;
+    if (o.wings) { drawRot(ctx, IMG['wing' + o.wings + 'back'], WC * kk, wx, wy, wp.a + offB, false); }
+    if (v.crown) { drawRot(ctx, img('crown'), G.canvas, head.x, head.y, ha, false); }
+
+    // тело: три прохода (контур, заливка, блик) одинаковыми кругами, поэтому швов нет
+    var pass = function (name, fn) {
+      var im = img(name);
+      if (!im || !im.naturalWidth) { return; }
+      for (var i = st0.length - 1; i >= 0; i--) { var f = fn(st0[i].r) * S; ctx.drawImage(im, st0[i].x - f / 2, st0[i].y - f / 2, f, f); }
+    };
+    G.passes.forEach(function (n) {
+      pass('stamp-' + n, n === 'out' ? function (rr) { return (rr + G.outline) / (G.bodyRadius + G.outline); }
+                                     : function (rr) { return rr / G.bodyRadius; });
+    });
+
+    if (o.wings) { drawRot(ctx, IMG['wing' + o.wings + 'front'], WC * kk, wx, wy, wp.a + offF, false); }
+
+    // челюсти и зев: j = 0 закрыты, 1 раскрыты
+    var j = Math.max(0, Math.min(1, o.jaw));
+    var deg = G.jaw.closed + (G.jaw.open - G.jaw.closed) * j, th = deg * Math.PI / 180;
+    var hg = G.jaw.hinge, ht = rot([hg[0], hg[1]], ha), hb = rot([hg[0], -hg[1]], ha);
+    var maw = img('maw');
+    if (maw && maw.naturalWidth) {
+      ctx.save(); ctx.translate(head.x, head.y); ctx.rotate(ha); ctx.scale(1, 0.12 + 0.88 * j);
+      ctx.drawImage(maw, -G.canvas / 2, -G.canvas / 2, G.canvas, G.canvas); ctx.restore();
+    }
+    drawRot(ctx, img('jaw-bottom'), G.canvas, head.x + hb.x, head.y + hb.y, ha - th, false);
+    drawRot(ctx, img('jaw-top'), G.canvas, head.x + ht.x, head.y + ht.y, ha + th, false);
+    drawRot(ctx, img('face-' + o.expr), G.canvas, head.x, head.y, ha, false);
+
+    if (o.prey) {
+      var bi = IMG['z1-beetle-a'];
+      if (bi && bi.naturalWidth) { ctx.drawImage(bi, 200, -50, 100, 100); }
+    }
+    if (o.anchors) {
+      var m = rot(G.anchors.mouth, ha);
+      dot(ctx, head.x + m.x, head.y + m.y, '#4DA3FF');
+      dot(ctx, head.x + G.anchors.crown[0], head.y + G.anchors.crown[1], '#FFD23F');
+      dot(ctx, wx, wy, '#FF4D4D');
+    }
+    // габариты для вписывания
+    var wl = 0;
+    if (o.wings) { wl = (WT.filter(function (x) { return x.tier === o.wings; })[0] || { L: 0 }).L; }
+    return { minX: -(Lb + G.tailRadius + 10) - (o.wave ? 0 : 0), maxX: 120 + (o.prey ? 190 : 0),
+             minY: Math.min(-70, o.wings ? wy - wl * 1.25 : -70), maxY: 80 + (o.wave ? 30 : 0), wave: o.wave ? 26 : 0 };
+  }
+
+  // Холст под размер элемента с учётом плотности пикселей
+  function sizeCanvas(cv) {
+    var dpr = Math.min(window.devicePixelRatio || 1, 2), w = cv.clientWidth, h = cv.clientHeight;
+    if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); }
+    var ctx = cv.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, w, h);
+    return { ctx: ctx, w: w, h: h };
+  }
+
+  // Рисует червя в холст cv; opt: fit (вписать), force (масштаб), thick, headOnly
+  function paint(cv, v, o, opt) {
+    var c = sizeCanvas(cv), ctx = c.ctx;
+    var W = c.w, H = c.h, thick = opt.thick || 1;
+    // пробный проход нужен только ради габаритов: считаем их по тем же формулам без рисования
+    var tmp = document.createElement('canvas').getContext('2d');
+    var b = drawWorm(tmp, v, o);
+    var f = opt.force || 1;
+    if (!opt.force) {
+      if (opt.fit) { f = Math.min(1.4, (W - 40) / (b.maxX - b.minX), (H - 30) / (b.maxY - b.minY + b.wave * 2)); }
+      f *= thick;
+    }
+    var ox, oy;
+    if (opt.headOnly) { ox = W / 2 - 32 * f; oy = H * 0.52; }
+    else if (opt.fit) { ox = W / 2 - ((b.minX + b.maxX) / 2) * f; oy = H - 16 * f - b.maxY * f * 0.2 - (b.maxY) * f * 0.8; }
+    else { ox = W - 20 - b.maxX * f; oy = H * (o.wings ? 0.64 : 0.5); }
+    if (opt.fit && !opt.headOnly) { oy = H * (o.wings ? 0.66 : 0.5); }
+    ctx.save(); ctx.translate(ox, oy); ctx.scale(f, f);
+    drawWorm(ctx, v, o);
+    ctx.restore();
+    return f;
+  }
+
+  function opts(extra) {
+    var o = { segs: st.segs, wave: st.wave, jaw: st.jaw, expr: st.expr, wings: st.wings, folded: st.folded,
+              flap: st.flap, anchors: st.anchors, prey: st.prey, t: T };
+    for (var k in extra) { o[k] = extra[k]; }
+    return o;
+  }
+
+  // ---------- каркас страницы ----------
   VARS.forEach(function (v) {
     var card = document.createElement('article');
     card.className = 'card'; card.id = 'card-' + v.id;
-    var strip = EXPRS.map(function (e) {
-      return '<figure>' + headHTML(v, e[0]) + '<figcaption>' + e[1] + '</figcaption></figure>';
-    }).join('');
-    var sizes = [24, 32, 48, 64, 96].map(function (s) {
-      return '<div class="sz">' + headHTML(v, 'idle', s) + s + ' px</div>';
-    }).join('');
+    var strip = EXPRS.map(function (e) { return '<figure><canvas data-e="' + e[0] + '" data-v="' + v.id + '"></canvas><figcaption>' + e[1] + '</figcaption></figure>'; }).join('');
+    var sizes = [32, 48, 64, 96].map(function (s) { return '<div class="sz"><canvas data-s="' + s + '" data-v="' + v.id + '" style="width:' + s + 'px;height:' + s + 'px"></canvas>' + s + ' px</div>'; }).join('');
     card.innerHTML =
       '<div class="card-head"><span class="tag">' + v.tag + '</span><h2>' + v.name + '</h2><span class="chosen">выбран</span><p>' + v.note + '</p></div>' +
-      '<div class="stage ground"></div><div class="info"></div>' +
+      '<canvas class="stage ground" data-v="' + v.id + '"></canvas><div class="info"></div>' +
       '<div class="strip">' + strip + '</div>' +
-      '<div class="mini">' + sizes + '<div><div class="tiny"></div><div class="lbl">червь целиком в 30%: читается ли силуэт</div></div></div>';
+      '<div class="mini">' + sizes + '<div><canvas class="tiny" data-t="1" data-v="' + v.id + '"></canvas><div class="lbl">червь целиком в 30%: читается ли силуэт</div></div></div>';
     $('variants').appendChild(card);
   });
 
-  // параметры адреса: ?segs=20&thick=1.2&expr=open&bg=light&taper=0&wave=0&beetle=0&fit=0&wings=1&anchors=1&pick=plum
   (function () {
     var q = new URLSearchParams(location.search);
     if (q.has('segs')) { st.segs = +q.get('segs'); $('segs').value = st.segs; $('segsV').textContent = st.segs; }
     if (q.has('thick')) { st.thick = +q.get('thick'); $('thick').value = st.thick; $('thickV').textContent = st.thick.toFixed(1); }
+    if (q.has('jaw')) { st.jaw = +q.get('jaw') / 100; $('jaw').value = Math.round(st.jaw * 100); $('jawV').textContent = Math.round(st.jaw * 100); }
     if (q.has('expr')) { st.expr = q.get('expr'); }
     if (q.has('bg')) { st.bg = q.get('bg'); }
     if (q.has('wings')) { st.wings = +q.get('wings'); }
-    ['taper', 'wave', 'beetle', 'fit', 'anchors', 'flap'].forEach(function (k) {
+    ['wave', 'prey', 'fit', 'anchors', 'flap', 'folded'].forEach(function (k) {
       if (q.has(k)) { st[k] = q.get(k) !== '0'; $(k).checked = st[k]; }
     });
     var saved = null;
     try { saved = localStorage.getItem('wormPick'); } catch (e) { saved = null; }
     var pick = q.get('pick') || saved;
     if (pick && byId(pick)) { st.pick = pick; }
-    // ?compact=1: только три сцены друг под другом; ?solo=plum: только один персонаж (проверка крупным планом)
     if (q.get('compact')) { document.body.classList.add('compact'); }
+    if (q.get('prog')) { document.body.classList.add('only-prog'); }
     var solo = q.get('solo');
     if (solo && byId(solo)) {
       document.body.classList.add('solo');
@@ -362,49 +405,149 @@
     }
   })();
 
-  function render() {
+  // ---------- рендер ----------
+  function renderCards() {
     VARS.forEach(function (v) {
-      var card = $('card-' + v.id);
-      var stage = card.querySelector('.stage');
+      var card = $('card-' + v.id), stage = card.querySelector('canvas.stage');
       stage.className = 'stage ' + st.bg;
-      var r = draw(stage, v, st);
-      card.querySelector('.info').textContent = 'Сегментов тела: ' + st.segs +
+      var f = paint(stage, v, opts({}), { fit: st.fit, thick: st.thick });
+      card.querySelector('.info').textContent = 'Длина тела: ' + st.segs + ' звеньев' +
         (st.wings ? ' · ' + wingName(st.wings) : ' · крыльев нет (по умолчанию)') +
-        (r.f < 0.995 ? ' · вписано в экран, масштаб ' + Math.round(r.f * 100) + '%' : '');
-      draw(card.querySelector('.tiny'), v, { segs: 8, thick: 1, expr: 'idle', taper: true, wave: false, beetle: false,
-                                             fit: false, forceScale: 0.3, wings: st.wings, anchors: false, flap: st.flap });
+        (f < 0.995 ? ' · вписано в экран, масштаб ' + Math.round(f * 100) + '%' : '');
+      Array.prototype.forEach.call(card.querySelectorAll('.strip canvas'), function (cv) {
+        var e = EXPRS.filter(function (x) { return x[0] === cv.dataset.e; })[0];
+        paint(cv, v, opts({ segs: 0, wave: false, expr: e[0], jaw: e[2], wings: 0, prey: false, anchors: false }), { force: 0.78, headOnly: true });
+      });
+      Array.prototype.forEach.call(card.querySelectorAll('.mini .sz canvas'), function (cv) {
+        var s = +cv.dataset.s;
+        paint(cv, v, opts({ segs: 0, wave: false, expr: 'idle', jaw: 0.53, wings: 0, prey: false, anchors: false }), { force: s / 190, headOnly: true });
+      });
+      paint(card.querySelector('canvas.tiny'), v, opts({ segs: 8, wave: false, expr: 'idle', jaw: 0.53, prey: false, anchors: false }), { force: 0.3 });
     });
-    renderProg();
   }
 
-  // ----- элементы управления -----
-  $('exprs').innerHTML = EXPRS.map(function (e) {
-    return '<button data-e="' + e[0] + '"' + (e[0] === st.expr ? ' class="on"' : '') + '>' + e[1] + '</button>';
-  }).join('');
-  $('wingsSeg').innerHTML = '<button data-w="0">Без крыльев</button>' + (window.WING_TIERS || []).map(function (t) {
+  // только главные сцены: их перерисовываем при анимации крыльев (остальные кадры статичны)
+  function renderStages() {
+    VARS.forEach(function (v) {
+      var stage = $('card-' + v.id).querySelector('canvas.stage');
+      stage.className = 'stage ' + st.bg;
+      paint(stage, v, opts({}), { fit: st.fit, thick: st.thick });
+    });
+  }
+
+  function renderProg() {
+    var v = byId(st.pick || 'plum'), host = $('prog');
+    if (!host.children.length) {
+      var cells = '';
+      for (var t = 0; t <= 5; t++) {
+        cells += '<div class="pcell"><div class="cap"><span class="lv' + (t ? '' : ' zero') + '">' + t + '</span><span></span></div>' +
+          '<canvas class="mstage ground" data-w="' + t + '"></canvas></div>';
+      }
+      host.innerHTML = cells;
+    }
+    Array.prototype.forEach.call(host.children, function (cell, t) {
+      cell.querySelector('.cap span:last-child').textContent = t ? wingName(t).replace(/^крылья \d: /, '') : 'без крыльев (по умолчанию)';
+      var cv = cell.querySelector('canvas');
+      cv.className = 'mstage ' + st.bg;
+      paint(cv, v, opts({ segs: 7, wave: false, expr: 'idle', jaw: 0.53, wings: t, prey: false, anchors: false }),
+            { force: 0.4 });
+    });
+  }
+
+  function renderPick() {
+    $('pick').innerHTML = VARS.map(function (v) {
+      var on = st.pick === v.id;
+      return '<button class="pc' + (on ? ' sel' : '') + '" data-id="' + v.id + '"><canvas data-v="' + v.id + '" data-on="' + (on ? 1 : 0) + '"></canvas>' +
+        '<span class="nm"><span class="tag">' + v.tag + '</span>' + v.name + '</span>' +
+        '<span class="tr">' + v.note + '</span><span class="go">' + (on ? 'Выбран ✓' : 'Выбрать') + '</span></button>';
+    }).join('');
+    $('pickInfo').textContent = st.pick ? 'Ваш червь: ' + byId(st.pick).name + '. Он останется с вами, пока вы не смените его в меню.'
+                                        : 'Нажмите на червя, чтобы выбрать.';
+    VARS.forEach(function (v) { $('card-' + v.id).classList.toggle('sel', st.pick === v.id); });
+    paintPick();
+    renderProg();
+  }
+  function paintPick() {
+    Array.prototype.forEach.call($('pick').querySelectorAll('canvas'), function (cv) {
+      var on = cv.dataset.on === '1', v = byId(cv.dataset.v);
+      paint(cv, v, opts({ segs: 0, wave: false, expr: on ? 'happy' : 'idle', jaw: on ? 0.8 : 0.53, wings: 0, prey: false, anchors: false }),
+            { force: 1.5, headOnly: true });
+    });
+  }
+
+  // добыча: кадры сверху и ползущие жуки со следом
+  var crawlers = [];
+  function renderPrey() {
+    var host = $('preyrow');
+    if (!host.children.length) {
+      host.innerHTML = '<canvas data-k="frames" class="ground"></canvas><canvas data-k="crawl" class="ground"></canvas>';
+    }
+    var fr = host.querySelector('[data-k=frames]'), c = sizeCanvas(fr), ctx = c.ctx;
+    var x = 24, names = ['z1-beetle-a', 'z1-beetle-b', 'z1-worm-a', 'z1-worm-b'];
+    names.forEach(function (n, i) {
+      var im = IMG[n];
+      if (im && im.naturalWidth) { ctx.drawImage(im, x + i * 130, 12, 128, 128); }
+    });
+    ctx.fillStyle = '#e9d7c0'; ctx.font = '12px system-ui'; ctx.textBaseline = 'top';
+    ['жук, шаг 1', 'жук, шаг 2', 'червячок, шаг 1', 'червячок, шаг 2'].forEach(function (s, i) { ctx.fillText(s, x + i * 130 + 24, 150); });
+    ctx.drawImage(IMG['z1-beetle-a'], 24, 120, 28, 28);
+  }
+  function tickPrey(dt) {
+    var cv = $('preyrow').querySelector('[data-k=crawl]');
+    if (!cv) { return; }
+    var c = sizeCanvas(cv), ctx = c.ctx, W = c.w, H = c.h;
+    if (!crawlers.length) {
+      crawlers = [{ x: 20, y: H * 0.3, v: 38, k: 'z1-beetle', s: 0.8, tr: [], acc: 0 },
+                  { x: 60, y: H * 0.62, v: 26, k: 'z1-worm', s: 0.8, tr: [], acc: 0 },
+                  { x: 140, y: H * 0.85, v: 46, k: 'z1-beetle', s: 0.5, tr: [], acc: 0 }];
+    }
+    crawlers.forEach(function (w) {
+      w.x += w.v * dt; if (w.x > W + 40) { w.x = -40; w.tr = []; }
+      w.acc += w.v * dt;
+      if (w.acc > 14) { w.acc = 0; w.tr.push({ x: w.x - 22 * w.s, y: w.y + (Math.random() - 0.5) * 6, age: 0 }); }
+      w.tr.forEach(function (p) { p.age += dt; });
+      w.tr = w.tr.filter(function (p) { return p.age < 1.8; });
+      w.tr.forEach(function (p) {
+        ctx.globalAlpha = 0.5 * (1 - p.age / 1.8); ctx.fillStyle = '#2a170e';
+        ctx.beginPath(); ctx.arc(p.x, p.y, 3.2 * w.s + 1, 0, 6.2832); ctx.fill();
+      });
+      ctx.globalAlpha = 1;
+      var im = IMG[w.k + (Math.floor(T * 7) % 2 ? '-a' : '-b')], sz = 128 * w.s;
+      if (im && im.naturalWidth) { ctx.drawImage(im, w.x - sz / 2, w.y - sz / 2, sz, sz); }
+    });
+  }
+
+  function renderAll() { renderCards(); renderProg(); paintPick(); renderPrey(); }
+
+  // ---------- элементы управления ----------
+  $('exprs').innerHTML = EXPRS.map(function (e) { return '<button data-e="' + e[0] + '"' + (e[0] === st.expr ? ' class="on"' : '') + '>' + e[1] + '</button>'; }).join('');
+  $('wingsSeg').innerHTML = '<button data-w="0">Без крыльев</button>' + WT.map(function (t) {
     return '<button data-w="' + t.tier + '" title="' + t.name + '">Крылья ' + t.tier + '</button>';
   }).join('');
-  function mark(seg, attr, val) {
-    Array.prototype.forEach.call(seg.children, function (c) { c.classList.toggle('on', String(c.dataset[attr]) === String(val)); });
-  }
+  function mark(seg, attr, val) { Array.prototype.forEach.call(seg.children, function (c) { c.classList.toggle('on', String(c.dataset[attr]) === String(val)); }); }
   mark($('bgs'), 'bg', st.bg);
   mark($('wingsSeg'), 'w', st.wings);
 
-  function wire(seg, attr, key, conv) {
+  function wire(seg, attr, key, conv, after) {
     seg.addEventListener('click', function (ev) {
       var b = ev.target.closest('button'); if (!b) { return; }
       st[key] = conv ? conv(b.dataset[attr]) : b.dataset[attr];
       mark(seg, attr, st[key]);
-      render();
+      if (after) { after(); }
+      renderAll();
     });
   }
-  wire($('exprs'), 'e', 'expr');
+  wire($('exprs'), 'e', 'expr', null, function () {
+    var e = EXPRS.filter(function (x) { return x[0] === st.expr; })[0];
+    st.jaw = e[2]; $('jaw').value = Math.round(st.jaw * 100); $('jawV').textContent = Math.round(st.jaw * 100);
+  });
   wire($('bgs'), 'bg', 'bg');
   wire($('wingsSeg'), 'w', 'wings', Number);
-  $('segs').addEventListener('input', function () { st.segs = +this.value; $('segsV').textContent = st.segs; render(); });
-  $('thick').addEventListener('input', function () { st.thick = +this.value; $('thickV').textContent = st.thick.toFixed(1); render(); });
-  ['taper', 'wave', 'beetle', 'fit', 'anchors', 'flap'].forEach(function (k) {
-    $(k).addEventListener('change', function () { st[k] = this.checked; render(); });
+  $('segs').addEventListener('input', function () { st.segs = +this.value; $('segsV').textContent = st.segs; renderCards(); });
+  $('thick').addEventListener('input', function () { st.thick = +this.value; $('thickV').textContent = st.thick.toFixed(1); renderCards(); });
+  $('jaw').addEventListener('input', function () { st.jaw = +this.value / 100; $('jawV').textContent = this.value; renderCards(); });
+  ['wave', 'prey', 'fit', 'anchors', 'flap', 'folded'].forEach(function (k) {
+    $(k).addEventListener('change', function () { st[k] = this.checked; renderAll(); });
   });
   $('pick').addEventListener('click', function (ev) {
     var b = ev.target.closest('.pc'); if (!b) { return; }
@@ -412,9 +555,9 @@
     try { localStorage.setItem('wormPick', st.pick); } catch (e) { /* без сохранения тоже работает */ }
     renderPick();
   });
-  window.addEventListener('resize', render);
+  window.addEventListener('resize', renderAll);
 
-  // ----- палитры -----
+  // ---------- палитры ----------
   var PALS = [
     ['Персик (A)', ['#FF9AA2', '#E56B7A', '#FFD9C9', '#7A1730', '#B3263E', '#FF6F8A']],
     ['Салат (B)', ['#9BE15D', '#5BB82F', '#F4F2A0', '#4FA83F', '#B9F27A']],
@@ -431,8 +574,23 @@
     }).join('') + '</div></div>';
   }).join(''));
 
-  renderPick();
-  render();
+  // ---------- старт и анимация ----------
+  var last = 0, acc = 0;
+  function tick(ts) {
+    var dt = Math.min(0.1, (ts - last) / 1000 || 0); last = ts; T += dt; acc += dt;
+    if (acc > 1 / 30) {
+      acc = 0;
+      if (st.wings && st.flap) { renderStages(); }
+      if (st.flap) { renderProg(); }
+      tickPrey(1 / 30);
+    }
+    requestAnimationFrame(tick);
+  }
+  loadAll(function () {
+    renderPick(); renderAll();
+    window.__ready = true;
+    requestAnimationFrame(tick);
+  });
 })();
 </script>
 </body>

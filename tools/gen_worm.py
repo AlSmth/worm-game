@@ -1,56 +1,80 @@
 #!/usr/bin/env python3
-"""Генератор персонажей-червей (SVG).
+"""Генератор персонажей-червей (SVG), модель 2: гладкая трубка и две челюсти.
 
 Запуск из корня проекта:  python tools/gen_worm.py
 
-Для каждого персонажа пишет design/worm/<slug>/worm-<slug>-*.svg:
-  head-idle|open|chomp|hurt|happy   голова (256×256), без макушки
-  crown                             макушка (256×256), рисуется ПОД головой; есть не у всех
-  body-a, body-b                    сегменты тела (128×128)
-  tail                              хвост (128×128)
-и design/preview/worm-geometry.js (геометрия и список персонажей для страницы превью).
+Тело червя: одна гладкая трубка без соединений. Игра (и страница превью) рисует её кругами-«штампами»
+вдоль пути головы в пять проходов: контур, тень, основной тон, свет, блик. Поэтому тело изгибается плавно и растёт без швов.
+На переднем конце две большие челюсти: размер челюсти определяет, какого размера добычу червь может съесть.
 
-Контур у всех частей одинаковый (OUT px при масштабе 1:1), поэтому швов по толщине нет.
-Правим параметры здесь и перегенерируем; SVG червей руками не правим.
+Для каждого персонажа пишет design/worm/<slug>/worm-<slug>-*.svg:
+  stamp-out|shade|main|light|gloss     круги тела (128×128): контур, тень, основной тон, свет, блик (плоские цвета)
+  jaw-top, jaw-bottom                  челюсти (256×256), центр холста = петля (шарнир) челюсти
+  maw                                  зев между челюстями (256×256), центр холста = центр головы
+  face-idle|open|chomp|hurt|happy      глаза, брови, румянец (256×256), центр холста = центр головы
+  crown                                макушка (256×256), рисуется ПОД телом; есть не у всех
+и design/preview/worm-geometry.js, design/worm/rig.json (единый источник чисел для игры и превью).
+
+Контур у всех частей одинаковый (OUT px при масштабе 1:1). Правим параметры здесь и перегенерируем;
+SVG червей руками не правим.
 """
 import json
 import math
 
-from svgkit import ROOT, OUTLINE, OUT, mix, lighten, rgrad, lgrad, qb, svg, write
+from svgkit import ROOT, OUTLINE, OUT, mix, lighten, rgrad, lgrad, svg, write
 
 WORM = ROOT / 'design' / 'worm'
 PREVIEW = ROOT / 'design' / 'preview'
 
-HEAD_CANVAS = 256
-SEG_CANVAS = 128
-HEAD_RX, HEAD_RY = 82, 76      # полуоси головы
-BEAD_R = 51                    # радиус сегмента тела
-WING_ANCHOR_Y = -(BEAD_R - 6)  # крыло растёт на 6 px внутри спины, стык закрывает «плечо»
+STAMP = 128       # холст круга тела
+CANVAS = 256      # холст головных деталей
+R_BODY = 44.0     # радиус тела (заливка), контур снаружи
+R_HEAD = 50.0     # радиус головы (заливка)
+R_TAIL = 27.0     # радиус на самом кончике хвоста
+HEAD_BULGE = 70   # на каком расстоянии от головы радиус сходит к телу
+TAPER_FROM = 0.70 # с какой доли длины начинается сужение хвоста
+SPACING = 11.0    # расстояние между кругами вдоль тела, px при масштабе 1:1 (≈ 0,25 радиуса): край света без зубчиков
+STEP = 72         # длина одного «звена» роста: сегменты тира задают длину тела (концепт, раздел 5)
+WING_DIST = 216   # крылья сидят в 3 звеньях от головы
+
+JAW = {
+    'hinge': [30, -4],      # шарнир верхней челюсти от центра головы (нижней: зеркально по y)
+    'length': 84,           # длина челюсти от шарнира до кончика
+    'rest': -10,            # угол в покое, градусы (минус: раскрыта вверх у верхней челюсти)
+    'open': -34,
+    'closed': 17,
+}
 
 GEOM = {
-    'headCanvas': HEAD_CANVAS,
-    'segCanvas': SEG_CANVAS,
-    'headToBead': 76,          # центр головы -> центр первого сегмента
-    'beadStep': 72,            # между центрами сегментов (перекрытие ≈ 30%)
-    'beadToTail': 68,          # центр последнего сегмента -> центр хвоста
-    'beadRadius': BEAD_R,
-    'wingBead': 3,             # крылья сидят на 3-м сегменте от головы
-    # точки привязки: смещение от центра холста своей части, px при масштабе 1:1
-    'anchors': {'mouth': [80, 34], 'wing': [0, WING_ANCHOR_Y], 'helmet': [0, -HEAD_RY]},
+    'stampCanvas': STAMP,
+    'canvas': CANVAS,
+    'bodyRadius': R_BODY,
+    'headRadius': R_HEAD,
+    'tailRadius': R_TAIL,
+    'outline': OUT,
+    'headBulge': HEAD_BULGE,
+    'taperFrom': TAPER_FROM,
+    'spacing': SPACING,
+    'step': STEP,
+    'wingDist': WING_DIST,
+    'jaw': JAW,
+    'passes': ['out', 'shade', 'main', 'light', 'gloss'],
+    # точки привязки: смещение от центра головы (или тела), px при масштабе 1:1
+    'anchors': {'mouth': [78, 4], 'wing': [0, -(R_BODY - 6)], 'crown': [0, -R_HEAD], 'helmet': [0, -R_HEAD]},
 }
 
 EXPRS = ('idle', 'open', 'chomp', 'hurt', 'happy')
 
 VARIANTS = {
     'peach': dict(tag='A', name='Персик', body='#FF9AA2', dark='#E56B7A', belly='#FFD9C9',
-                  crown=None, brows=False, teeth='buck', pupil=11.5, iris=None, blush=True,
-                  note='Милаха: круглые глаза, два передних зуба, румянец. Самый добрый.'),
+                  crown=None, brows=False, teeth='blunt', pupil=9.5, iris=None, blush=True,
+                  note='Милаха: круглые глаза, румянец, тупые зубки. Самый добрый.'),
     'salad': dict(tag='B', name='Салат', body='#9BE15D', dark='#5BB82F', belly='#F4F2A0',
-                  crown='sprout', brows=True, teeth='grin', pupil=8.5, iris=None, blush=False,
-                  note='Хулиган: широкая зубастая улыбка, хитрые брови, росток на макушке.'),
+                  crown='sprout', brows=True, teeth='grin', pupil=7.2, iris=None, blush=False,
+                  note='Хулиган: частые зубки, хитрые брови, росток на макушке.'),
     'plum': dict(tag='C', name='Слива', body='#B58CFF', dark='#7E57E0', belly='#F1E3FF',
-                 crown='crest', brows=True, teeth='fangs', pupil=9.5, iris='#FFD23F', blush=False,
-                 note='Монстрик: клычки, гребень на макушке, жёлтые глаза. Мультяшный и дружелюбный.'),
+                 crown='crest', brows=True, teeth='fangs', pupil=8.0, iris='#FFD23F', blush=False,
+                 note='Монстрик: два клычка, гребень на макушке, жёлтые глаза. Мультяшный и дружелюбный.'),
 }
 
 MOUTH_DARK = '#7A1730'
@@ -58,29 +82,145 @@ MOUTH_LIGHT = '#B3263E'
 TONGUE = '#FF6F8A'
 
 
-# ---------- примитивы ----------
-def tooth_rect(x, y, w, h, sw=3.5, rx=3.5):
-    return (f'<rect x="{x:.1f}" y="{y:.1f}" width="{w:.1f}" height="{h:.1f}" rx="{rx}" '
-            f'fill="#FFFFFF" stroke="{OUTLINE}" stroke-width="{sw}"/>')
+def jaw_plate(v):
+    """Цвет пластины челюсти: чуть темнее и насыщеннее тела, чтобы челюсти читались на фоне головы."""
+    return mix(v['body'], v['dark'], .5)
 
 
-def fang(x, y, w, h, sw=3.5):
-    d = f'M {x - w / 2:.1f} {y:.1f} L {x + w / 2:.1f} {y:.1f} L {x:.1f} {y + h:.1f} Z'
-    return f'<path d="{d}" fill="#FFFFFF" stroke="{OUTLINE}" stroke-width="{sw}"/>'
+# ---------- тело: круги-штампы ----------
+# Тело рисуется несколькими проходами одинаковых кругов вдоль пути головы: контур, тень, основной тон, свет, блик.
+# Каждый проход закрашен плоским цветом, поэтому объединение кругов без швов; объём даёт смещение кругов вверх.
+PASSES = ('out', 'shade', 'main', 'light', 'gloss')
 
 
-def spiral(cx, cy, r_max, turns=2.4, n=56):
-    pts = []
+def stamp_svg(slug, kind):
+    v = VARIANTS[slug]
+    c = STAMP // 2
+    R = R_BODY
+    if kind == 'out':
+        art = f'<circle cx="{c}" cy="{c}" r="{R + OUT:.1f}" fill="{OUTLINE}"/>'
+    elif kind == 'shade':
+        art = f'<circle cx="{c}" cy="{c}" r="{R:.1f}" fill="{mix(v["body"], v["dark"], .95)}"/>'
+    elif kind == 'main':
+        art = f'<circle cx="{c}" cy="{c - 0.09 * R:.1f}" r="{0.90 * R:.1f}" fill="{v["body"]}"/>'
+    elif kind == 'light':
+        art = f'<circle cx="{c}" cy="{c - 0.27 * R:.1f}" r="{0.62 * R:.1f}" fill="{lighten(v["body"], .38)}"/>'
+    else:  # gloss
+        art = (f'<ellipse cx="{c - 3}" cy="{c - 0.64 * R:.1f}" rx="{0.5 * R:.1f}" ry="6" '
+               f'transform="rotate(-5 {c - 3} {c - 0.64 * R:.1f})" fill="{lighten(v["body"], .8)}"/>')
+    return svg(STAMP, [], art)
+
+
+# ---------- челюсти ----------
+def bez(b, c, t_, u):
+    w = 1 - u
+    return (w * w * b[0] + 2 * w * u * c[0] + u * u * t_[0], w * w * b[1] + 2 * w * u * c[1] + u * u * t_[1])
+
+
+def bez_tan(b, c, t_, u):
+    w = 1 - u
+    return (2 * w * (c[0] - b[0]) + 2 * u * (t_[0] - c[0]), 2 * w * (c[1] - b[1]) + 2 * u * (t_[1] - c[1]))
+
+
+def jaw_path(L):
+    """Контуры челюсти (верхней): центральная кривая, внешняя и внутренняя кромки, нормали. Система: x вперёд, y вниз, шарнир в (0, 0)."""
+    B, C, T = (0.0, 0.0), (0.56 * L, -0.66 * L), (L, -0.02 * L)
+    n = 28
+    mid, outer, inner, norms = [], [], [], []
     for i in range(n + 1):
-        t = i / n
-        a = t * turns * 2 * math.pi
-        pts.append((cx + r_max * t * math.cos(a), cy + r_max * t * math.sin(a)))
-    return 'M ' + ' L '.join(f'{x:.1f} {y:.1f}' for x, y in pts)
+        u = i / n
+        x, y = bez(B, C, T, u)
+        tx, ty = bez_tan(B, C, T, u)
+        ln = math.hypot(tx, ty) or 1
+        nx, ny = ty / ln, -tx / ln          # наружу (вверх для верхней челюсти)
+        w = 34 * (1 - u) ** 0.85 + 9 * u
+        mid.append((x, y))
+        outer.append((x + nx * w / 2, y + ny * w / 2))
+        inner.append((x - nx * w / 2, y - ny * w / 2))
+        norms.append((nx, ny, w))
+    return mid, outer, inner, norms
 
 
-# ---------- глаза ----------
-ER = (18, 21)
-EYES = [(-12, -22), (26, -24)]
+def tooth(base, d, h, w, style):
+    """Зуб: основание на кромке в точке base, направление d (единичный вектор), высота h, ширина w."""
+    nx, ny = -d[1], d[0]
+    a = (base[0] + nx * w / 2 - d[0] * 3, base[1] + ny * w / 2 - d[1] * 3)
+    b = (base[0] - nx * w / 2 - d[0] * 3, base[1] - ny * w / 2 - d[1] * 3)
+    tip = (base[0] + d[0] * h, base[1] + d[1] * h)
+    if style == 'round':
+        # тупой зуб: прямоугольник со скруглением
+        c1 = (a[0] + d[0] * h * 0.95, a[1] + d[1] * h * 0.95)
+        c2 = (b[0] + d[0] * h * 0.95, b[1] + d[1] * h * 0.95)
+        dd = (f'M {a[0]:.1f} {a[1]:.1f} L {c1[0]:.1f} {c1[1]:.1f} Q {tip[0] + d[0] * h * 0.1:.1f} {tip[1] + d[1] * h * 0.1:.1f} '
+              f'{c2[0]:.1f} {c2[1]:.1f} L {b[0]:.1f} {b[1]:.1f} Z')
+    else:
+        dd = f'M {a[0]:.1f} {a[1]:.1f} L {tip[0]:.1f} {tip[1]:.1f} L {b[0]:.1f} {b[1]:.1f} Z'
+    return f'<path d="{dd}" fill="#FFFFFF" stroke="{OUTLINE}" stroke-width="3.2"/>'
+
+
+def teeth_spec(v, lower):
+    """(u, высота, ширина, стиль) вдоль внутренней кромки; нижняя челюсть смещена на полшага, зубы входят между верхними."""
+    t = v['teeth']
+    if t == 'blunt':
+        s = [(.30, 17, 17, 'round'), (.52, 17, 17, 'round'), (.74, 14, 15, 'round')]
+        lo = [(.41, 15, 16, 'round'), (.63, 13, 15, 'round')]
+    elif t == 'grin':
+        s = [(.20, 11, 11, 'tri'), (.36, 12, 11, 'tri'), (.52, 12, 11, 'tri'), (.68, 11, 10, 'tri'), (.84, 9, 9, 'tri')]
+        lo = [(.28, 10, 10, 'tri'), (.44, 11, 10, 'tri'), (.60, 11, 10, 'tri'), (.76, 9, 9, 'tri')]
+    else:  # fangs: два клычка и мелкие зубки
+        s = [(.34, 20, 14, 'tri'), (.58, 9, 9, 'tri'), (.72, 9, 9, 'tri'), (.86, 17, 11, 'tri')]
+        lo = [(.46, 15, 12, 'tri'), (.78, 8, 8, 'tri')]
+    return lo if lower else s
+
+
+def jaw_svg(slug, lower):
+    v = JAW
+    var = VARIANTS[slug]
+    L = JAW['length']
+    mid, outer, inner, norms = jaw_path(L)
+    sy = -1 if lower else 1
+
+    def P(p):
+        return (p[0], p[1] * sy)
+
+    plate = jaw_plate(var)
+    p = f'worm-{slug}-jaw-{"bottom" if lower else "top"}'
+    defs = [f'<linearGradient id="{p}-g" gradientUnits="userSpaceOnUse" x1="0" y1="-62" x2="0" y2="62">'
+            f'<stop offset="0" stop-color="{lighten(plate, .5)}"/><stop offset=".5" stop-color="{plate}"/>'
+            f'<stop offset="1" stop-color="{mix(plate, var["dark"], .9)}"/></linearGradient>']
+    pts = [P(q) for q in outer] + [P(q) for q in inner[::-1]]
+    d_plate = 'M ' + ' L '.join(f'{x:.1f} {y:.1f}' for x, y in pts) + ' Z'
+    g = []
+    # зубы: от внутренней кромки к оси рта; рисуются под пластиной
+    for (u, h, w, style) in teeth_spec(var, lower):
+        i = min(len(mid) - 1, max(0, round(u * (len(mid) - 1))))
+        nx, ny, _ = norms[i]
+        base = P(inner[i])
+        d = (-nx, -ny * sy)    # от кромки внутрь (к оси рта)
+        g.append(tooth(base, d, h, w, style))
+    g.append(f'<path d="{d_plate}" fill="url(#{p}-g)" stroke="{OUTLINE}" stroke-width="{OUT}"/>')
+    # блик по внешней кромке и «шарнир»
+    hi = [P(outer[i]) for i in range(2, 17)]
+    sh = [(q[0] - 0.0, q[1] + (4.5 if not lower else -4.5)) for q in hi]
+    g.append('<path d="M ' + ' L '.join(f'{x:.1f} {y:.1f}' for x, y in sh) +
+             f'" fill="none" stroke="#FFFFFF" stroke-opacity="{0.55 if not lower else 0.28}" stroke-width="3.6"/>')
+    return svg(CANVAS, defs, f'<g transform="translate(128 128)" stroke-linejoin="round" stroke-linecap="round">{"".join(g)}</g>')
+
+
+# ---------- зев ----------
+def maw_svg(slug):
+    p = f'worm-{slug}-maw'
+    defs = [lgrad(f'{p}-cav', [(0, MOUTH_DARK), (1, MOUTH_LIGHT)], 0, 0, 1, 0)]
+    art = (f'<g transform="translate(128 128)" stroke-linejoin="round">'
+           f'<ellipse cx="46" cy="2" rx="24" ry="30" fill="url(#{p}-cav)" stroke="{OUTLINE}" stroke-width="{OUT - 1}"/>'
+           f'<ellipse cx="56" cy="14" rx="13" ry="9" fill="{TONGUE}"/>'
+           f'</g>')
+    return svg(CANVAS, defs, art)
+
+
+# ---------- лицо ----------
+ER = (15, 18)
+EYES = [(-6, -22), (20, -27)]
 
 
 def eye_normal(c, v, k=1.0):
@@ -100,123 +240,98 @@ def eye_normal(c, v, k=1.0):
 
 
 def eye_squeeze(c, side):
-    """Зажмуренный глаз (жуёт): «>» у левого, «<» у правого."""
+    """Зажмуренный глаз (жуёт): «>» у заднего, «<» у переднего."""
     cx, cy = c
     if side == 0:
-        d = f'M {cx - 12} {cy - 13} L {cx + 9} {cy} L {cx - 12} {cy + 13}'
+        d = f'M {cx - 10} {cy - 11} L {cx + 8} {cy} L {cx - 10} {cy + 11}'
     else:
-        d = f'M {cx + 12} {cy - 13} L {cx - 9} {cy} L {cx + 12} {cy + 13}'
-    return f'<path d="{d}" fill="none" stroke="{OUTLINE}" stroke-width="6.5"/>'
+        d = f'M {cx + 10} {cy - 11} L {cx - 8} {cy} L {cx + 10} {cy + 11}'
+    return f'<path d="{d}" fill="none" stroke="{OUTLINE}" stroke-width="6"/>'
 
 
 def eye_happy(c):
     cx, cy = c
-    return (f'<path d="M {cx - 16} {cy + 7} Q {cx} {cy - 22} {cx + 16} {cy + 7}" fill="none" '
-            f'stroke="{OUTLINE}" stroke-width="6.5"/>')
+    return (f'<path d="M {cx - 13} {cy + 6} Q {cx} {cy - 19} {cx + 13} {cy + 6}" fill="none" '
+            f'stroke="{OUTLINE}" stroke-width="6"/>')
+
+
+def spiral(cx, cy, r_max, turns=2.4, n=56):
+    pts = []
+    for i in range(n + 1):
+        t = i / n
+        a = t * turns * 2 * math.pi
+        pts.append((cx + r_max * t * math.cos(a), cy + r_max * t * math.sin(a)))
+    return 'M ' + ' L '.join(f'{x:.1f} {y:.1f}' for x, y in pts)
 
 
 def eye_swirl(c):
     cx, cy = c
     return (f'<ellipse cx="{cx}" cy="{cy}" rx="{ER[0]}" ry="{ER[1]}" fill="#FFFFFF" '
             f'stroke="{OUTLINE}" stroke-width="{OUT - 1}"/>'
-            f'<path d="{spiral(cx, cy, 13)}" fill="none" stroke="{OUTLINE}" stroke-width="3.2"/>')
+            f'<path d="{spiral(cx, cy, 11)}" fill="none" stroke="{OUTLINE}" stroke-width="3"/>')
 
 
 def brows(style):
-    if style == 'cheeky':
-        L, R = ((-34, -58), (-2, -50)), ((10, -50), (40, -58))
+    (x1, y1), (x2, y2) = EYES
+    if style == 'cheeky':      # хитрые: внутренние концы вниз
+        L, R = ((x1 - 16, y1 - 28), (x1 + 11, y1 - 21)), ((x2 - 11, y2 - 24), (x2 + 15, y2 - 30))
     elif style == 'worried':
-        L, R = ((-34, -50), (-2, -58)), ((10, -58), (40, -50))
-    else:  # raised
-        return (f'<path d="M -32 -50 Q -14 -62 2 -52" fill="none" stroke="{OUTLINE}" stroke-width="6.5"/>'
-                f'<path d="M 14 -52 Q 28 -64 42 -54" fill="none" stroke="{OUTLINE}" stroke-width="6.5"/>')
-    return ''.join(f'<path d="M {a[0]} {a[1]} L {b[0]} {b[1]}" fill="none" stroke="{OUTLINE}" stroke-width="6.5"/>'
+        L, R = ((x1 - 16, y1 - 21), (x1 + 11, y1 - 28)), ((x2 - 11, y2 - 30), (x2 + 15, y2 - 22))
+    else:                      # подняты
+        return (f'<path d="M {x1 - 15} {y1 - 24} Q {x1} {y1 - 36} {x1 + 13} {y1 - 26}" fill="none" stroke="{OUTLINE}" stroke-width="6"/>'
+                f'<path d="M {x2 - 12} {y2 - 28} Q {x2 + 2} {y2 - 40} {x2 + 15} {y2 - 30}" fill="none" stroke="{OUTLINE}" stroke-width="6"/>')
+    return ''.join(f'<path d="M {a[0]} {a[1]} L {b[0]} {b[1]}" fill="none" stroke="{OUTLINE}" stroke-width="6"/>'
                    for a, b in (L, R))
 
 
-# ---------- рот ----------
-SMILE = ((-22, 20), (22, 52), (64, 16))
-
-MOUTH_OPEN = 'M -28 18 Q 24 6 80 22 Q 92 58 36 78 Q -22 76 -28 18 Z'
-MOUTH_CLENCH = 'M -26 24 Q 24 16 76 26 Q 86 48 30 56 Q -24 54 -26 24 Z'
-MOUTH_HAPPY = 'M -26 14 Q 26 28 78 12 Q 86 66 30 72 Q -24 70 -26 14 Z'
-
-
-def teeth_top(v, y, h):
-    t = v['teeth']
-    if t == 'buck':
-        return [tooth_rect(4, y, 20, h), tooth_rect(24, y, 20, h)]
-    if t == 'grin':
-        return [tooth_rect(x, y, 15, h * 0.72, rx=3) for x in (-16, -1, 14, 29, 44)]
-    out = [tooth_rect(x, y, 10, h * 0.5, rx=2.5) for x in (6, 16, 26, 36)]
-    out += [fang(-8, y, 15, h), fang(58, y, 15, h)]
-    return out
-
-
-def closed_mouth(v):
-    t = v['teeth']
-    s = []
-    if t == 'buck':
-        s += [tooth_rect(8.5, 31, 13, 22), tooth_rect(21.5, 31, 13, 22)]
-    elif t == 'grin':
-        for tt in (0.25, 0.375, 0.5, 0.625, 0.75):
-            x, y = qb(*SMILE, tt)
-            s.append(tooth_rect(x - 5.4, y - 3, 10.8, 14, sw=2.8, rx=2.5))
+def face_svg(slug, expr):
+    v = VARIANTS[slug]
+    layers = []
+    if v['blush'] or expr == 'happy':
+        k = 1.25 if expr == 'happy' else 1.0
+        layers.append(f'<ellipse cx="2" cy="8" rx="{11 * k:.1f}" ry="{7 * k:.1f}" fill="#FF5C7A" fill-opacity=".5"/>')
+        layers.append(f'<ellipse cx="34" cy="2" rx="{8 * k:.1f}" ry="{5.5 * k:.1f}" fill="#FF5C7A" fill-opacity=".5"/>')
+    if expr == 'open':
+        eyes = ''.join(eye_normal(c, v, 1.1) for c in EYES)
+    elif expr == 'chomp':
+        eyes = ''.join(eye_squeeze(c, i) for i, c in enumerate(EYES))
+    elif expr == 'hurt':
+        eyes = ''.join(eye_swirl(c) for c in EYES)
+    elif expr == 'happy':
+        eyes = ''.join(eye_happy(c) for c in EYES)
     else:
-        for tt in (0.2, 0.8):
-            x, y = qb(*SMILE, tt)
-            s.append(fang(x, y - 2, 13, 15, sw=3))
-    p0, p1, p2 = SMILE
-    s.append(f'<path d="M {p0[0]} {p0[1]} Q {p1[0]} {p1[1]} {p2[0]} {p2[1]}" fill="none" '
-             f'stroke="{OUTLINE}" stroke-width="{OUT}"/>')
-    return ''.join(s)
-
-
-def open_mouth(p, v, path, tongue, teeth_y, teeth_h):
-    s = [f'<path d="{path}" fill="url(#{p}-cav)"/>']
-    s.append(f'<g clip-path="url(#{p}-mclip)">')
-    s.append(f'<ellipse cx="{tongue[0]}" cy="{tongue[1]}" rx="{tongue[2]}" ry="{tongue[3]}" fill="{TONGUE}" '
-             f'stroke="{OUTLINE}" stroke-width="3.5"/>')
-    s += teeth_top(v, teeth_y, teeth_h)
-    s.append('</g>')
-    s.append(f'<path d="{path}" fill="none" stroke="{OUTLINE}" stroke-width="{OUT}"/>')
-    return ''.join(s), path
-
-
-def chomp_mouth(p):
-    """Стиснутые зубы: два ряда, смещённые на ползуба, как в мультяшном «ам»."""
-    s = [f'<path d="{MOUTH_CLENCH}" fill="#FFFFFF"/>',
-         f'<g clip-path="url(#{p}-mclip)" fill="none" stroke="{OUTLINE}" stroke-width="2.8">']
-    s += [f'<path d="M {x} 16 L {x} 39"/>' for x in (-12, 4, 20, 36, 52, 68)]
-    s += [f'<path d="M {x} 39 L {x} 60"/>' for x in (-4, 12, 28, 44, 60)]
-    s.append('<path d="M -30 38 Q 24 43 84 35" stroke-width="3.6"/>')
-    s.append('</g>')
-    s.append(f'<path d="{MOUTH_CLENCH}" fill="none" stroke="{OUTLINE}" stroke-width="{OUT}"/>')
-    return ''.join(s), MOUTH_CLENCH
+        eyes = ''.join(eye_normal(c, v) for c in EYES)
+    layers.append(eyes)
+    if expr == 'hurt':
+        layers.append(brows('worried'))
+    elif expr != 'happy' and v['brows']:
+        layers.append(brows('raised' if expr == 'open' else 'cheeky'))
+    return svg(CANVAS, [], f'<g transform="translate(128 128)" stroke-linejoin="round" stroke-linecap="round">{"".join(layers)}</g>')
 
 
 # ---------- макушка ----------
 def sprout(p):
-    return (f'<path d="M 4 -66 Q 2 -88 8 -104" fill="none" stroke="{OUTLINE}" stroke-width="12"/>'
-            f'<path d="M 4 -66 Q 2 -88 8 -104" fill="none" stroke="#4FA83F" stroke-width="5.5"/>'
-            f'<path d="M 8 -98 C -14 -112 -32 -100 -30 -86 C -14 -82 2 -86 8 -98 Z" '
+    top = -R_HEAD
+    return (f'<path d="M -4 {top + 10} Q -6 {top - 12} 0 {top - 28}" fill="none" stroke="{OUTLINE}" stroke-width="12"/>'
+            f'<path d="M -4 {top + 10} Q -6 {top - 12} 0 {top - 28}" fill="none" stroke="#4FA83F" stroke-width="5.5"/>'
+            f'<path d="M 0 {top - 22} C -22 {top - 36} -40 {top - 24} -38 {top - 10} C -22 {top - 6} -6 {top - 10} 0 {top - 22} Z" '
             f'fill="url(#{p}-leaf)" stroke="{OUTLINE}" stroke-width="4.5"/>'
-            f'<path d="M 9 -104 C 28 -124 52 -116 52 -100 C 40 -92 20 -92 9 -104 Z" '
+            f'<path d="M 1 {top - 28} C 20 {top - 48} 44 {top - 40} 44 {top - 24} C 32 {top - 16} 12 {top - 16} 1 {top - 28} Z" '
             f'fill="url(#{p}-leaf)" stroke="{OUTLINE}" stroke-width="4.5"/>')
 
 
 def crest(p):
     out = []
-    for xb, hgt in ((-36, 30), (0, 38), (36, 30)):
-        yb = -HEAD_RY * math.sqrt(1 - (xb / HEAD_RX) ** 2)
-        d = (f'M {xb - 13:.1f} {yb + 12:.1f} Q {xb - 11:.1f} {yb - hgt * 0.4:.1f} {xb + 4:.1f} {yb - hgt:.1f} '
-             f'Q {xb + 15:.1f} {yb - hgt * 0.4:.1f} {xb + 13:.1f} {yb + 12:.1f} Z')
+    for xb, hgt in ((-30, 26), (-4, 34), (22, 26)):
+        yb = -math.sqrt(max(1.0, R_HEAD ** 2 - xb ** 2))
+        d = (f'M {xb - 12:.1f} {yb + 12:.1f} Q {xb - 10:.1f} {yb - hgt * 0.4:.1f} {xb + 3:.1f} {yb - hgt:.1f} '
+             f'Q {xb + 14:.1f} {yb - hgt * 0.4:.1f} {xb + 12:.1f} {yb + 12:.1f} Z')
         out.append(f'<path d="{d}" fill="url(#{p}-crest)" stroke="{OUTLINE}" stroke-width="4.5"/>')
     return ''.join(out)
 
 
 def crown_svg(slug):
-    """Макушка отдельным слоем: рисуется ПОД головой, чтобы шлем и броня могли её закрыть."""
+    """Макушка отдельным слоем: рисуется ПОД телом, чтобы шлем и рога могли её закрыть."""
     v = VARIANTS[slug]
     if not v['crown']:
         return None
@@ -227,133 +342,35 @@ def crown_svg(slug):
     else:
         defs = [lgrad(f'{p}-crest', [(0, '#B6FAE6'), (1, '#4FD6B3')])]
         art = crest(p)
-    return svg(HEAD_CANVAS, defs,
-               f'<g transform="translate(128 128)" stroke-linejoin="round" stroke-linecap="round">{art}</g>')
-
-
-# ---------- голова ----------
-def head_svg(slug, expr):
-    v = VARIANTS[slug]
-    p = f'worm-{slug}-head-{expr}'
-    body, dark, belly = v['body'], v['dark'], v['belly']
-    defs = [
-        rgrad(f'{p}-hg', [(0, lighten(body, .5)), (.55, body), (1, mix(body, dark, .85))], cx=.42, cy=.28, r=.9),
-        rgrad(f'{p}-mz', [(0, lighten(belly, .55)), (1, belly)], cx=.5, cy=.3, r=.9),
-        lgrad(f'{p}-cav', [(0, MOUTH_DARK), (1, MOUTH_LIGHT)]),
-        f'<clipPath id="{p}-clip"><ellipse rx="{HEAD_RX}" ry="{HEAD_RY}"/></clipPath>',
-    ]
-
-    layers = [f'<ellipse rx="{HEAD_RX}" ry="{HEAD_RY}" fill="url(#{p}-hg)"/>']
-
-    inner = [f'<ellipse cx="24" cy="30" rx="52" ry="36" fill="url(#{p}-mz)"/>']
-    if v['blush'] or expr == 'happy':
-        k = 1.25 if expr == 'happy' else 1.0
-        inner.append(f'<ellipse cx="-18" cy="28" rx="{12 * k:.1f}" ry="{7.5 * k:.1f}" fill="#FF5C7A" fill-opacity=".5"/>')
-        inner.append(f'<ellipse cx="62" cy="24" rx="{9 * k:.1f}" ry="{6 * k:.1f}" fill="#FF5C7A" fill-opacity=".5"/>')
-    if expr == 'hurt':
-        inner.append(f'<circle cx="-52" cy="-44" r="12" fill="{lighten(body, .35)}" stroke="{OUTLINE}" stroke-width="4"/>'
-                     f'<ellipse cx="-55" cy="-48" rx="4.5" ry="2.8" fill="#FFFFFF" fill-opacity=".7"/>')
-    inner.append('<ellipse cx="-40" cy="-50" rx="22" ry="8" transform="rotate(-35 -40 -50)" '
-                 'fill="#FFFFFF" fill-opacity=".55"/>')
-    layers.append(f'<g clip-path="url(#{p}-clip)">{"".join(inner)}</g>')
-    layers.append(f'<ellipse rx="{HEAD_RX}" ry="{HEAD_RY}" fill="none" stroke="{OUTLINE}" stroke-width="{OUT}"/>')
-
-    # глаза
-    if expr == 'open':
-        eyes = ''.join(eye_normal(c, v, 1.08) for c in EYES)
-    elif expr == 'chomp':
-        eyes = ''.join(eye_squeeze(c, i) for i, c in enumerate(EYES))
-    elif expr == 'hurt':
-        eyes = ''.join(eye_swirl(c) for c in EYES)
-    elif expr == 'happy':
-        eyes = ''.join(eye_happy(c) for c in EYES)
-    else:
-        eyes = ''.join(eye_normal(c, v) for c in EYES)
-    layers.append(eyes)
-
-    # брови
-    if expr == 'hurt':
-        layers.append(brows('worried'))
-    elif expr != 'happy' and v['brows']:
-        layers.append(brows('raised' if expr == 'open' else 'cheeky'))
-
-    # рот
-    if expr == 'idle':
-        layers.append(closed_mouth(v))
-    elif expr == 'hurt':
-        layers.append(f'<path d="M -18 36 q 9 -13 18 0 t 18 0 t 18 0 t 18 0" fill="none" '
-                      f'stroke="{OUTLINE}" stroke-width="{OUT}"/>')
-    else:
-        if expr == 'open':
-            m, path = open_mouth(p, v, MOUTH_OPEN, (24, 62, 36, 15), 10, 24)
-        elif expr == 'chomp':
-            m, path = chomp_mouth(p)
-        else:
-            m, path = open_mouth(p, v, MOUTH_HAPPY, (22, 56, 32, 13), 8, 20)
-        defs.append(f'<clipPath id="{p}-mclip"><path d="{path}"/></clipPath>')
-        layers.append(m)
-
-    layers.append('<circle id="anchor-mouth" cx="80" cy="34" r="2" fill="none"/>')
-    layers.append(f'<circle id="anchor-helmet" cx="0" cy="{-HEAD_RY}" r="2" fill="none"/>')
-    body_svg = (f'<g transform="translate(128 128)" stroke-linejoin="round" stroke-linecap="round">'
-                f'{"".join(layers)}</g>')
-    return svg(HEAD_CANVAS, defs, body_svg)
-
-
-# ---------- сегмент тела ----------
-def bead_svg(slug, kind):
-    v = VARIANTS[slug]
-    p = f'worm-{slug}-body-{kind}'
-    base = v['body'] if kind == 'a' else mix(v['body'], v['dark'], .62)
-    defs = [rgrad(f'{p}-g', [(0, lighten(base, .5)), (.5, base), (1, mix(base, v['dark'], .85))],
-                  cx=.42, cy=.28, r=.9)]
-    body_svg = (f'<g transform="translate(64 64)" stroke-linejoin="round" stroke-linecap="round">'
-                f'<circle r="{BEAD_R}" fill="url(#{p}-g)" stroke="{OUTLINE}" stroke-width="{OUT}"/>'
-                f'<ellipse cx="-10" cy="-30" rx="21" ry="8" transform="rotate(-14 -10 -30)" '
-                f'fill="#FFFFFF" fill-opacity=".5"/>'
-                f'<circle id="anchor-wing" cx="0" cy="{WING_ANCHOR_Y}" r="2" fill="none"/>'
-                f'<circle id="anchor-armor" cx="0" cy="0" r="2" fill="none"/>'
-                f'</g>')
-    return svg(SEG_CANVAS, defs, body_svg)
-
-
-# ---------- хвост ----------
-def tail_svg(slug):
-    v = VARIANTS[slug]
-    p = f'worm-{slug}-tail'
-    base = v['body']
-    defs = [rgrad(f'{p}-g', [(0, lighten(base, .5)), (.5, base), (1, mix(base, v['dark'], .85))],
-                  cx=.55, cy=.28, r=.9)]
-    d = 'M 14 58 C 30 42 50 20 78 18 A 46 46 0 0 1 78 110 C 50 108 30 86 14 70 A 6.5 6.5 0 0 1 14 58 Z'
-    body_svg = (f'<g stroke-linejoin="round" stroke-linecap="round">'
-                f'<path d="{d}" fill="url(#{p}-g)" stroke="{OUTLINE}" stroke-width="{OUT}"/>'
-                f'<ellipse cx="48" cy="40" rx="17" ry="6" transform="rotate(-24 48 40)" '
-                f'fill="#FFFFFF" fill-opacity=".5"/>'
-                f'</g>')
-    return svg(SEG_CANVAS, defs, body_svg)
+    return svg(CANVAS, defs, f'<g transform="translate(128 128)" stroke-linejoin="round" stroke-linecap="round">{art}</g>')
 
 
 def main():
     count = 0
     for slug in VARIANTS:
         d = WORM / slug
+        # убираем файлы прежней модели (бусины и головы целиком), чтобы они не попали в атлас
+        for old in list(d.glob('*.svg')):
+            old.unlink()
+        for kind in PASSES:
+            write(d / f'worm-{slug}-stamp-{kind}.svg', stamp_svg(slug, kind))
+            count += 1
+        write(d / f'worm-{slug}-jaw-top.svg', jaw_svg(slug, False))
+        write(d / f'worm-{slug}-jaw-bottom.svg', jaw_svg(slug, True))
+        write(d / f'worm-{slug}-maw.svg', maw_svg(slug))
+        count += 3
         for expr in EXPRS:
-            write(d / f'worm-{slug}-head-{expr}.svg', head_svg(slug, expr))
+            write(d / f'worm-{slug}-face-{expr}.svg', face_svg(slug, expr))
             count += 1
         crown = crown_svg(slug)
         if crown:
             write(d / f'worm-{slug}-crown.svg', crown)
             count += 1
-        write(d / f'worm-{slug}-body-a.svg', bead_svg(slug, 'a'))
-        write(d / f'worm-{slug}-body-b.svg', bead_svg(slug, 'b'))
-        write(d / f'worm-{slug}-tail.svg', tail_svg(slug))
-        count += 3
-    chars = [{'id': k, 'tag': v['tag'], 'name': v['name'], 'note': v['note'], 'crown': bool(v['crown'])}
-             for k, v in VARIANTS.items()]
+    chars = [{'id': k, 'tag': v['tag'], 'name': v['name'], 'note': v['note'], 'crown': bool(v['crown']),
+              'body': v['body'], 'dark': v['dark']} for k, v in VARIANTS.items()]
     js = ('window.WORM_GEOM = ' + json.dumps(GEOM) + ';\n'
           'window.WORM_VARIANTS = ' + json.dumps(chars, ensure_ascii=False) + ';\n')
     write(PREVIEW / 'worm-geometry.js', js)
-    # то же для игры: единый источник чисел (design/worm/rig.json)
     rig = dict(GEOM)
     rig['skins'] = chars
     write(WORM / 'rig.json', json.dumps(rig, ensure_ascii=False, indent=1) + '\n')

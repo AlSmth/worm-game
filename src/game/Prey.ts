@@ -1,66 +1,114 @@
 import Phaser from 'phaser';
+import { WORLD_WIDTH } from '../data/world';
 
-export type PreyKind = 'soil' | 'surface' | 'air';
+export type PreyLayer = 'soil' | 'surface';
+export type Species = 'beetle' | 'worm';
 
 export interface PreyItem {
   img: Phaser.GameObjects.Image;
   x: number;
   y: number;
+  /** «Размер» добычи: радиус, который должен поместиться в раскрытые челюсти. */
   r: number;
-  kind: PreyKind;
+  kind: PreyLayer;
+  species: Species;
   vx: number;
   baseY: number;
   phase: number;
   turnIn: number;
   dying: boolean;
+  /** Таймер смены кадра лап и текущий кадр (0 или 1). */
+  step: number;
+  frame: number;
+  /** Пройдено с последней метки следа, px. */
+  trail: number;
 }
 
-const BEETLE_RADIUS = 48; // радиус тела жука на рисунке 128×128
-const BEETLE_FEET = 52; // от центра рисунка до лапок
+/** Радиус тела на рисунке 128×128, px: по нему задаётся масштаб спрайта. */
+const BODY_R: Record<Species, number> = { beetle: 34, worm: 40 };
+const STEP_SECONDS: Record<Species, number> = { beetle: 0.12, worm: 0.22 };
 const COUNT = 30;
 const START_CLEARANCE = 320; // свободная зона вокруг червя при начальной расстановке, px при масштабе 1
-const TINTS = [0xffffff, 0xffe2b0, 0xd2f5a8, 0xffbcbc, 0xbddcff, 0xf3c6ff];
+const TINTS: Record<Species, number[]> = {
+  beetle: [0xffffff, 0xffe2b0, 0xd2f5a8, 0xffbcbc, 0xbddcff, 0xf3c6ff],
+  worm: [0xffffff, 0xffdcd2, 0xe6ffd2, 0xd8e8ff],
+};
+const TRAIL_COLOR = 0x2a170e;
+const TRAIL_LIFE = 1.7;
 
 export interface View {
   w: number; // видимая область в px мира
   h: number;
 }
 
+interface Mark {
+  img: Phaser.GameObjects.Image;
+  life: number;
+  max: number;
+  s0: number;
+}
+
 /**
- * Добыча-болванки для прототипа: жуки разных размеров под землёй, на поверхности и в воздухе.
- * Съедобной считается добыча не крупнее пасти червя.
+ * Добыча зоны 1: жуки и червячки, вид сверху. Ползают по земле и оставляют за собой небольшой след.
+ * Съедобной считается добыча, которая помещается в раскрытые челюсти червя (радиус не больше радиуса пасти).
  */
 export class PreySystem {
   items: PreyItem[] = [];
+  private freeMarks: Mark[] = [];
+  private liveMarks: Mark[] = [];
 
   constructor(private scene: Phaser.Scene) {}
 
-  /** Заполнить всю область вокруг червя при старте. */
-  populate(wx: number, wy: number, S: number, view: View, jumpH: number): void {
-    for (let i = 0; i < COUNT; i++) this.spawn(wx, wy, S, view, jumpH, false);
+  /** Заполнить область вокруг червя при старте. */
+  populate(wx: number, wy: number, S: number, view: View, surfaceOpen: boolean): void {
+    for (let i = 0; i < COUNT; i++) this.spawn(wx, wy, S, view, surfaceOpen, false);
   }
 
-  update(dt: number, t: number, wx: number, wy: number, S: number, view: View, jumpH: number): void {
+  update(dt: number, t: number, wx: number, wy: number, S: number, view: View, surfaceOpen: boolean): void {
+    const bound = WORLD_WIDTH / 2 - 300 * S;
     for (const it of this.items) {
       if (it.dying) continue;
       it.phase += dt;
+      const k = it.r / BODY_R[it.species];
       if (it.kind === 'surface') {
         it.turnIn -= dt;
         if (it.turnIn <= 0) {
           it.vx = -it.vx || 30 * S;
           it.turnIn = 2 + Math.random() * 4;
         }
-        it.x += it.vx * dt;
-        it.y = -(it.r / BEETLE_RADIUS) * BEETLE_FEET;
-      } else if (it.kind === 'soil') {
-        it.x += it.vx * dt;
-        it.y = it.baseY + Math.sin(t * 1.5 + it.phase) * 6 * S;
+        it.y = -0.22 * it.r;
       } else {
-        it.x += it.vx * dt * 0.4;
-        it.y = it.baseY + Math.sin(t * 2 + it.phase) * 10 * S;
+        it.turnIn -= dt;
+        if (it.turnIn <= 0) {
+          it.vx = (Math.random() < 0.3 ? -it.vx : it.vx) || 20 * S;
+          it.turnIn = 3 + Math.random() * 6;
+        }
+        it.y = it.baseY + Math.sin(t * 1.4 + it.phase) * 6 * S;
+      }
+      const dx = it.vx * dt;
+      it.x += dx;
+      if (Math.abs(it.x) > bound) {
+        it.x = Math.sign(it.x) * bound;
+        it.vx = -it.vx;
+      }
+      // лапки: кадры сменяются, пока добыча ползёт
+      it.step += dt;
+      if (it.step >= STEP_SECONDS[it.species]) {
+        it.step = 0;
+        it.frame ^= 1;
+        it.img.setFrame(`z1-${it.species}-${it.frame ? 'b' : 'a'}`);
+      }
+      // след: тёмные точки за ползущей добычей, постепенно тают
+      it.trail += Math.abs(dx);
+      const every = 15 * k;
+      if (it.trail >= every) {
+        it.trail = 0;
+        const behind = -Math.sign(it.vx || 1) * 40 * k;
+        this.addMark(it.x + behind, it.y + (Math.random() - 0.5) * 6 * k, (0.1 + 0.07 * Math.random()) * k);
       }
       it.img.setPosition(it.x, it.y).setFlipX(it.vx < 0);
     }
+    this.updateMarks(dt);
     // удаляем ушедших далеко и добавляем новых у краёв области
     const halfW = view.w * 1.0;
     const halfH = view.h * 1.3;
@@ -72,33 +120,63 @@ export class PreySystem {
         this.items.splice(i, 1);
       }
     }
-    while (this.items.filter((it) => !it.dying).length < COUNT) this.spawn(wx, wy, S, view, jumpH, true);
+    while (this.items.filter((it) => !it.dying).length < COUNT) this.spawn(wx, wy, S, view, surfaceOpen, true);
   }
 
-  private spawn(wx: number, wy: number, S: number, view: View, jumpH: number, atEdge: boolean): void {
-    const roll = Math.random();
-    const kind: PreyKind = roll < 0.62 ? 'soil' : roll < 0.8 ? 'surface' : 'air';
-    const r = S * (16 + 48 * Math.pow(Math.random(), 1.1));
+  private spawn(wx: number, wy: number, S: number, view: View, surfaceOpen: boolean, atEdge: boolean): void {
+    const kind: PreyLayer = surfaceOpen && Math.random() < 0.22 ? 'surface' : 'soil';
+    const species: Species = Math.random() < 0.55 ? 'beetle' : 'worm';
+    const r = S * (14 + 70 * Math.pow(Math.random(), 1.1));
+    const bound = WORLD_WIDTH / 2 - 300 * S;
     let x = wx;
     let y = wy;
     // При начальной расстановке вокруг червя остаётся свободная зона: первая добыча достаётся игроку, а не появляется во рту.
     for (let attempt = 0; attempt < 8; attempt++) {
       const side = Math.random() < 0.5 ? -1 : 1;
       x = atEdge ? wx + side * view.w * (0.6 + Math.random() * 0.4) : wx + (Math.random() * 2 - 1) * view.w * 0.9;
-      if (kind === 'soil') y = Math.max(r + 40 * S, wy + (Math.random() * 2 - 0.6) * view.h * 0.9);
-      else if (kind === 'surface') y = -(r / BEETLE_RADIUS) * BEETLE_FEET;
-      else y = -(0.25 + Math.random() * 0.65) * jumpH - r;
+      x = Math.max(-bound, Math.min(bound, x));
+      if (kind === 'soil') y = Math.max(r + 60 * S, wy + (Math.random() * 2 - 0.6) * view.h * 0.9);
+      else y = -0.22 * r;
       if (kind === 'soil') y = Math.min(y, 1700 * S);
       if (atEdge || Math.hypot(x - wx, y - wy) > START_CLEARANCE * S) break;
     }
     const vx = (Math.random() < 0.5 ? -1 : 1) * (10 + Math.random() * 30) * S;
+    const tints = TINTS[species];
     const img = this.scene.add
-      .image(x, y, 'props', 'z1-beetle')
-      .setScale(r / BEETLE_RADIUS)
+      .image(x, y, 'props', `z1-${species}-a`)
+      .setScale(r / BODY_R[species])
       .setDepth(-50)
-      .setTint(TINTS[Math.floor(Math.random() * TINTS.length)])
+      .setTint(tints[Math.floor(Math.random() * tints.length)])
       .setFlipX(vx < 0);
-    this.items.push({ img, x, y, r, kind, vx, baseY: y, phase: Math.random() * 6, turnIn: 2 + Math.random() * 4, dying: false });
+    this.items.push({
+      img, x, y, r, kind, species, vx, baseY: y, phase: Math.random() * 6, turnIn: 2 + Math.random() * 4,
+      dying: false, step: Math.random() * 0.1, frame: 0, trail: Math.random() * 10,
+    });
+  }
+
+  // ---------- след ----------
+  private addMark(x: number, y: number, s: number): void {
+    const m =
+      this.freeMarks.pop() ??
+      ({ img: this.scene.add.image(0, 0, 'fx-dot').setDepth(-56), life: 0, max: 1, s0: 1 } as Mark);
+    m.life = m.max = TRAIL_LIFE * (0.8 + Math.random() * 0.4);
+    m.s0 = s;
+    m.img.setPosition(x, y).setTint(TRAIL_COLOR).setScale(s).setAlpha(0.5).setVisible(true);
+    this.liveMarks.push(m);
+  }
+
+  private updateMarks(dt: number): void {
+    for (let i = this.liveMarks.length - 1; i >= 0; i--) {
+      const m = this.liveMarks[i];
+      m.life -= dt;
+      if (m.life <= 0) {
+        m.img.setVisible(false);
+        this.liveMarks.splice(i, 1);
+        this.freeMarks.push(m);
+        continue;
+      }
+      m.img.setAlpha(0.5 * (m.life / m.max)).setScale(m.s0 * (0.6 + 0.4 * (m.life / m.max)));
+    }
   }
 
   isEdible(it: PreyItem, mouthRadius: number): boolean {
@@ -128,5 +206,9 @@ export class PreySystem {
   clear(): void {
     this.items.forEach((it) => it.img.destroy());
     this.items = [];
+    this.liveMarks.forEach((m) => m.img.destroy());
+    this.freeMarks.forEach((m) => m.img.destroy());
+    this.liveMarks = [];
+    this.freeMarks = [];
   }
 }

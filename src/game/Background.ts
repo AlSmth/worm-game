@@ -1,8 +1,9 @@
 import Phaser from 'phaser';
+import { WORLD_WIDTH } from '../data/world';
 
 /**
- * Временный фон прототипа: небо, трава, почва с затемнением на глубине. Всё привязано к миру и рисуется
- * только в видимой области, поэтому тянется бесконечно. Настоящие слои (параллакс) будут на этапе 3.
+ * Временный фон прототипа: небо, трава, почва с затемнением на глубине и каменные стены по краям карты.
+ * Всё привязано к миру и рисуется только в видимой области, поэтому тянется бесконечно. Настоящие слои (параллакс) будут на этапе 3.
  */
 export class WorldBackground {
   private sky: Phaser.GameObjects.Rectangle;
@@ -11,6 +12,9 @@ export class WorldBackground {
   private shade: Phaser.GameObjects.Image;
   private deep: Phaser.GameObjects.Rectangle;
   private grass: Phaser.GameObjects.TileSprite;
+  private walls: Phaser.GameObjects.TileSprite[] = [];
+  private rims: Phaser.GameObjects.Rectangle[] = [];
+  private edges: Phaser.GameObjects.Rectangle[] = [];
 
   constructor(scene: Phaser.Scene) {
     this.sky = scene.add.rectangle(0, 0, 10, 10, 0x3f9cff).setOrigin(0, 0).setDepth(-100);
@@ -19,6 +23,12 @@ export class WorldBackground {
     this.shade = scene.add.image(0, 0, 'bg-depth').setOrigin(0, 0).setDepth(-97);
     this.deep = scene.add.rectangle(0, 0, 10, 10, 0x120806, 0.9).setOrigin(0, 0).setDepth(-97);
     this.grass = scene.add.tileSprite(0, 0, 10, 48, 'bg-grass').setOrigin(0, 0).setDepth(-60);
+    // стены: слева (индекс 0) и справа (индекс 1) за краем карты, поверх почвы и травы, под добычей
+    for (let i = 0; i < 2; i++) {
+      this.walls.push(scene.add.tileSprite(0, 0, 10, 10, 'bg-soil').setOrigin(0, 0).setDepth(-59).setTint(0x8c93ad));
+      this.rims.push(scene.add.rectangle(0, 0, 10, 10, 0x120806, 0.6).setOrigin(0, 0).setDepth(-58));
+      this.edges.push(scene.add.rectangle(0, 0, 10, 10, 0xd7dcec, 1).setOrigin(0, 0).setDepth(-57));
+    }
   }
 
   update(cam: Phaser.Cameras.Scene2D.Camera, S: number): void {
@@ -56,5 +66,33 @@ export class WorldBackground {
     this.grass.setVisible(bottom > -gh && top < gh).setPosition(left, -26 * ts).setSize(width, gh);
     this.grass.setTileScale(ts, ts);
     this.grass.tilePositionX = left / ts;
+
+    // каменные стены по краям карты, от неба до глубины
+    const half = WORLD_WIDTH / 2;
+    const right = left + width;
+    const rimW = Math.max(40, 70 * S);
+    const wallH = bottom - top;
+    const sides: Array<[number, number, number]> = [
+      [left, -half, 0], // слева: от края видимой области до границы мира
+      [half, right, 1], // справа: от границы мира до края видимой области
+    ];
+    for (const [x0, x1, i] of sides) {
+      const w = x1 - x0;
+      const wall = this.walls[i];
+      const rim = this.rims[i];
+      wall.setVisible(w > 0);
+      rim.setVisible(i === 0 ? left < -half + rimW && right > -half : right > half - rimW && left < half);
+      if (w > 0) {
+        wall.setPosition(x0, top).setSize(w, Math.max(1, wallH));
+        wall.setTileScale(ts, ts);
+        wall.tilePositionX = x0 / ts;
+        wall.tilePositionY = top / ts;
+      }
+      // тёмная полоса у кромки внутри карты и светлая кромка самой стены: граница читается сразу
+      if (rim.visible) rim.setPosition(i === 0 ? -half : half - rimW, top).setSize(rimW, Math.max(1, wallH));
+      const edge = this.edges[i];
+      const ew = Math.max(8, 14 * S);
+      edge.setVisible(w > 0).setPosition(i === 0 ? -half - ew : half, top).setSize(ew, Math.max(1, wallH));
+    }
   }
 }

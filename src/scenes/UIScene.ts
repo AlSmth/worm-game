@@ -21,6 +21,8 @@ export class UIScene extends Phaser.Scene {
   private pauseBtn!: Btn;
   private soundBtn!: Btn;
   private hint!: Phaser.GameObjects.Text;
+  private toastText!: Phaser.GameObjects.Text;
+  private toastKey: string | null = null;
   private hintLeft = HINT_SECONDS;
   private overlay!: Phaser.GameObjects.Container;
   private overlayDim!: Phaser.GameObjects.Rectangle;
@@ -43,6 +45,11 @@ export class UIScene extends Phaser.Scene {
       .text(0, 0, '', { ...this.textStyle(20, 4), align: 'center' })
       .setOrigin(0.5, 1)
       .setDepth(11);
+    this.toastText = this.add
+      .text(0, 0, '', { ...this.textStyle(22, 5), align: 'center' })
+      .setOrigin(0.5, 0)
+      .setDepth(13)
+      .setAlpha(0);
     this.buildOverlay();
     this.layoutAll();
     this.scale.on('resize', () => this.layoutAll());
@@ -128,9 +135,13 @@ export class UIScene extends Phaser.Scene {
     // подсказка внизу по центру
     const touch = isCoarsePointer();
     this.hint.setStyle(this.textStyle(touch ? 20 : 19, 4));
-    this.hint.setText(`${touch ? t('hint_move_touch') : t('hint_move_mouse')}\n${t('hint_jump')}`);
+    this.hint.setText(`${touch ? t('hint_move_touch') : t('hint_move_mouse')}\n${t('hint_eat')}`);
     this.hint.setWordWrapWidth(Math.max(240 * u, W * 0.86));
     this.hint.setPosition(W / 2, H - 18 * u);
+    this.toastText.setStyle({ ...this.textStyle(22, 5), align: 'center' });
+    this.toastText.setWordWrapWidth(Math.max(260 * u, W * 0.8));
+    this.toastText.setPosition(W / 2, 84 * u);
+    this.toastKey = null; // подпись перерисуется на новом языке и размере
 
     // окно паузы
     this.overlayDim.setSize(W, H);
@@ -243,6 +254,19 @@ export class UIScene extends Phaser.Scene {
     if (this.hintLeft > 0 && !state.paused) {
       this.hintLeft -= delta / 1000;
       this.hint.setAlpha(Math.max(0, Math.min(1, this.hintLeft / 1.5)));
+    }
+    // короткое сообщение (выход на поверхность закрыт или открылся)
+    const toast = state.toast;
+    if (toast.key && toast.left > 0) {
+      if (!state.paused) toast.left -= delta / 1000;
+      if (this.toastKey !== toast.key) {
+        this.toastKey = toast.key;
+        this.toastText.setText(t(toast.key));
+      }
+      this.toastText.setAlpha(Math.max(0, Math.min(1, toast.left / 0.6, (toast.total - toast.left) / 0.2)));
+    } else if (this.toastText.alpha !== 0) {
+      this.toastText.setAlpha(0);
+      this.toastKey = null;
     }
   }
 

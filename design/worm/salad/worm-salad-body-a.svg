@@ -1,4 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
-<defs><radialGradient id="worm-salad-body-a-g" cx="0.42" cy="0.28" r="0.9"><stop offset="0" stop-color="#CDF0AE"/><stop offset="0.5" stop-color="#9BE15D"/><stop offset="1" stop-color="#65BE36"/></radialGradient></defs>
-<g transform="translate(64 64)" stroke-linejoin="round" stroke-linecap="round"><circle r="51" fill="url(#worm-salad-body-a-g)" stroke="#2B1B17" stroke-width="5.5"/><ellipse cx="-10" cy="-30" rx="21" ry="8" transform="rotate(-14 -10 -30)" fill="#FFFFFF" fill-opacity=".5"/><circle id="anchor-wing" cx="0" cy="-45" r="2" fill="none"/><circle id="anchor-armor" cx="0" cy="0" r="2" fill="none"/></g>
-</svg>

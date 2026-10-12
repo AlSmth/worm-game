@@ -8,6 +8,8 @@ export interface DevApi {
   addGrowth(n: number): void;
   setTier(n: number): void;
   autopilot(on: boolean): void;
+  setPos(x: number, y: number): void;
+  world(): { width: number; surfaceTier: number };
   resetSave(): void;
 }
 

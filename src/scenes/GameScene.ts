@@ -6,11 +6,12 @@ import { Fx } from '../game/Fx';
 import { controls } from '../core/controls';
 import { sfx } from '../core/audio';
 import { hideLoader } from '../core/loader';
-import { state, hitsUi } from '../core/state';
+import { state, hitsUi, showToast } from '../core/state';
 import { platform } from '../platform/platform';
 import { save } from '../platform/save';
 import { MAX_TIER, growthFor, growthNeeded, segmentsAt, wormScale } from '../data/growth';
 import { clampLevel, type Upgrades } from '../data/upgrades';
+import { SURFACE_TIER, WORLD_WIDTH } from '../data/world';
 import type { SkinId } from '../data/skins';
 import { mountDevPanel, type DevApi } from '../dev/devPanel';
 
@@ -31,6 +32,9 @@ export class GameScene extends Phaser.Scene {
   private eaten = 0;
   private autopilot = false;
   private camReady = false;
+  /** Кратковременный отъезд камеры при открытии поверхности (доля, плавно спадает). */
+  private camKick = 0;
+  private lastBump = -1e9;
 
   constructor() {
     super('Game');
@@ -56,10 +60,12 @@ export class GameScene extends Phaser.Scene {
     this.worm.reset(0, 260 * S0, 0);
     this.worm.onExit = () => this.onExit();
     this.worm.onEnter = () => this.onEnter();
+    this.worm.onBump = () => this.onBump();
+    this.worm.canExit = state.tier >= SURFACE_TIER;
 
     this.prey = new PreySystem(this);
     this.updateCamera(0, true);
-    this.prey.populate(0, this.worm.y, S0, this.view(), this.worm.jumpHeight);
+    this.prey.populate(0, this.worm.y, S0, this.view(), this.worm.canExit);
 
     this.setupInput();
     platform.onPause((p) => this.onPlatformPause(p));
@@ -127,8 +133,9 @@ export class GameScene extends Phaser.Scene {
     if (state.paused) return;
     const dt = Math.min(delta / 1000, 0.05);
     const w = this.worm;
+    w.canExit = state.tier >= SURFACE_TIER;
     w.update(dt, this.readSteer(), time);
-    this.prey.update(dt, time / 1000, w.x, w.y, w.scale, this.view(), w.jumpHeight);
+    this.prey.update(dt, time / 1000, w.x, w.y, w.scale, this.view(), w.canExit);
     this.checkEating(time);
     this.updateCamera(dt, false);
     this.bg.update(this.cameras.main, w.scale);
@@ -146,10 +153,16 @@ export class GameScene extends Phaser.Scene {
     const S = w.scale;
     const viewH = BASE_VIEW_H * Math.pow(S, 0.85);
     const viewW = BASE_VIEW_W * Math.pow(S, 0.85);
-    const targetZoom = Math.min(cam.height / viewH, cam.width / viewW);
+    this.camKick = Math.max(0, this.camKick - dt * 0.12);
+    const targetZoom = Math.min(cam.height / viewH, cam.width / viewW) * (1 - this.camKick);
     if (snap || !this.camReady) cam.setZoom(targetZoom);
     else cam.setZoom(cam.zoom + (targetZoom - cam.zoom) * Math.min(1, 3 * dt));
-    const cx = w.x + w.vx * 0.22;
+    // камера не показывает пустоту за стенами карты: у края останавливается, оставляя видимой полосу стены
+    const visW = cam.width / cam.zoom;
+    const minC = -WORLD_WIDTH / 2 + visW * 0.42;
+    const maxC = WORLD_WIDTH / 2 - visW * 0.42;
+    const rawX = w.x + w.vx * 0.22;
+    const cx = minC < maxC ? Math.max(minC, Math.min(maxC, rawX)) : 0;
     const cy = w.y + w.vy * 0.12 - viewH * 0.06;
     const tx = cx - cam.width / 2;
     const ty = cy - cam.height / 2;
@@ -209,6 +222,7 @@ export class GameScene extends Phaser.Scene {
 
   private addGrowth(points: number): void {
     state.growth += points;
+    const tierBefore = state.tier;
     let up = false;
     while (state.growth >= state.need && state.tier < MAX_TIER) {
       state.growth -= state.need;
@@ -220,6 +234,16 @@ export class GameScene extends Phaser.Scene {
     save.patch({ tier: state.tier, growth: state.growth });
     this.applySize();
     if (up) this.tierUp();
+    // поверхность открывается при пересечении порога, даже если одним укусом перескочили через тир
+    if (tierBefore < SURFACE_TIER && state.tier >= SURFACE_TIER) this.surfaceUnlocked();
+  }
+
+  /** Червь упёрся в «корку» под травой: подсказываем, что выход откроется с ростом (не чаще раза в несколько секунд). */
+  private onBump(): void {
+    const now = this.time.now;
+    if (now - this.lastBump < 6000) return;
+    this.lastBump = now;
+    showToast('hint_locked', 3.5);
   }
 
   private tierUp(): void {
@@ -228,6 +252,16 @@ export class GameScene extends Phaser.Scene {
     w.flash('happy', 900, this.time.now);
     this.fx.ring(w.x, w.y, w.scale);
     this.fx.burst(w.x, w.y, w.scale, { count: 18, tex: 'fx-star', colors: STARS, speed: 520, life: 0.8, gravity: 700, size: 26 });
+  }
+
+  /** Выход на поверхность открылся: сигнал, подсказка и заметный отъезд камеры. */
+  private surfaceUnlocked(): void {
+    const w = this.worm;
+    showToast('hint_unlocked', 6);
+    this.camKick = 0.16;
+    this.time.delayedCall(260, () => sfx.play('grow'));
+    this.fx.ring(w.x, w.y, w.scale * 1.4, 0x7bd957);
+    this.fx.burst(w.x, w.y, w.scale, { count: 26, tex: 'fx-star', colors: STARS, speed: 640, life: 1.0, gravity: 600, size: 30 });
   }
 
   // ---------- поверхность ----------
@@ -277,6 +311,9 @@ export class GameScene extends Phaser.Scene {
         canvasW: this.game.canvas.width,
         canvasH: this.game.canvas.height,
         audio: sfx.contextState,
+        canExit: this.worm.canExit,
+        toast: state.toast.left > 0 ? state.toast.key : null,
+        jaw: Math.round(this.worm.jaw * 100) / 100,
       }),
       setSkin: (id: SkinId) => {
         this.worm.setSkin(id);
@@ -294,6 +331,11 @@ export class GameScene extends Phaser.Scene {
       autopilot: (on) => {
         this.autopilot = on;
       },
+      setPos: (x, y) => {
+        this.worm.reset(x, y, this.worm.heading);
+        this.camReady = false;
+      },
+      world: () => ({ width: WORLD_WIDTH, surfaceTier: SURFACE_TIER }),
       resetSave: () => {
         save.reset();
         window.location.reload();

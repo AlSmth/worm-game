@@ -84,6 +84,8 @@ def t_jump(b, shots):
     boot(b, URL)
     b.eval("localStorage.clear(); 0")
     boot(b, URL)
+    b.eval('window.__dev.setTier(window.__dev.world().surfaceTier)')  # выход на поверхность открыт с этого тира
+    time.sleep(2.5)
     s0 = state(b)
     # цель у верхнего края видимой области, справа от червя (там небо над землёй)
     view_top = b.eval('window.__dev.scene.cameras.main.worldView.y')
@@ -121,7 +123,9 @@ def t_wings(b, shots):
         check(f'крылья {n}: два слоя на черве, прыжок выше', c == 2 and (n == 1 or h0 > prev), f'слоёв={c}, высота={h0:.0f}')
         prev = h0
         b.screenshot(shots / f'g04-wings-{n}.png')
-    # под землёй крылья сложены, в прыжке раскрыты
+    # под землёй крылья сложены, в прыжке раскрыты (выход на поверхность открыт с 5-го тира)
+    b.eval('window.__dev.setTier(window.__dev.world().surfaceTier)')
+    time.sleep(2.5)
     check('крылья 5: под землёй сложены', b.eval('window.__dev.scene.worm.wingOpen') < 0.2, str(b.eval('window.__dev.scene.worm.wingOpen')))
     s0 = state(b)
     view_top = b.eval('window.__dev.scene.cameras.main.worldView.y')
@@ -554,11 +558,150 @@ def t_tiers(b, shots):
     b.eval("localStorage.clear(); 0")
 
 
+def t_surface(b, shots):
+    """Прогрессия масштаба: до 5-го тира выход на поверхность закрыт (червь скользит под травой), на 5-м открывается."""
+    boot(b, URL)
+    b.eval("localStorage.clear(); 0")
+    boot(b, URL)
+    w = b.eval('window.__dev.world()')
+    s = state(b)
+    check('поверхность: на старте закрыта', s['canExit'] is False and s['tier'] == 1, f"tier={s['tier']}, canExit={s['canExit']}")
+    b.key_down('KeyW')
+    min_y, got_air = 1e9, False
+    t0 = time.time()
+    while time.time() - t0 < 4.0:
+        time.sleep(0.05)
+        s = state(b)
+        got_air = got_air or s['inAir']
+        min_y = min(min_y, s['y'])
+    check('поверхность закрыта: червь упирается под травой и не выпрыгивает', (not got_air) and min_y > 20, f'самая высокая точка y={min_y:.0f}, прыжок={got_air}')
+    check('поверхность закрыта: подсказка «подрастите»', state(b)['toast'] == 'hint_locked', str(state(b)['toast']))
+    b.screenshot(shots / 'g11-locked.png')
+    b.key_up('KeyW')
+    b.eval('window.__dev.setTier(%d); 0' % (w['surfaceTier'] - 1))
+    b.eval('window.__dev.addGrowth(%d)' % (state(b)['need'] + 1))
+    time.sleep(0.6)
+    s = state(b)
+    check('поверхность открылась на нужном тире', s['tier'] == w['surfaceTier'] and s['canExit'] is True, f"tier={s['tier']}, canExit={s['canExit']}")
+    check('открытие: подсказка «теперь можно выпрыгнуть»', s['toast'] == 'hint_unlocked', str(s['toast']))
+    b.screenshot(shots / 'g11-unlocked.png')
+    time.sleep(2.5)
+    b.key_down('KeyW')
+    got, t0 = False, time.time()
+    while time.time() - t0 < 5 and not got:
+        time.sleep(0.05)
+        got = state(b)['inAir']
+    b.key_up('KeyW')
+    check('после открытия червь выпрыгивает на поверхность', got)
+    check('поверхность: нет ошибок в консоли', not b.errors(), str(b.errors()))
+
+
+def t_world(b, shots):
+    """Карта: червь 1-го тира без улучшений скорости пересекает её за ≈ 5 минут; по краям стены."""
+    boot(b, URL)
+    b.eval("localStorage.clear(); 0")
+    boot(b, URL)
+    w = b.eval('window.__dev.world()')
+    # червь мог успеть что-то съесть и вырасти, поэтому берём скорость червя масштаба 1
+    speed = b.eval('window.__dev.scene.worm.swimSpeed / window.__dev.scene.worm.scale')
+    check('карта: от края до края ≈ 5 минут', 290 <= w['width'] / speed <= 310,
+          f"{w['width'] / speed:.0f} с (ширина {w['width']:.0f} px, скорость {speed:.0f} px/с)")
+    half = w['width'] / 2
+    for side, key, sign in (('правая', 'ArrowRight', 1), ('левая', 'ArrowLeft', -1)):
+        b.eval('window.__dev.setPos(%d, 400)' % (sign * (half - 700)))
+        time.sleep(1.0)
+        b.key_down(key)
+        far = 0
+        t0 = time.time()
+        while time.time() - t0 < 5.0:
+            time.sleep(0.05)
+            far = max(far, sign * state(b)['x'])
+        b.key_up(key)
+        check(f'карта: {side} стена не пускает', far <= half, f'дальше всего {far:.0f}, край {half:.0f}')
+        cam = b.eval("(function(){var c=window.__dev.scene.cameras.main; var v=c.width/c.zoom; return {edge: Math.abs(c.scrollX + c.width/2) + v/2, v: v}})()")
+        check(f'карта: камера у {side} стены не уезжает в пустоту', cam['edge'] <= half + 0.12 * cam['v'], f"{cam['edge']:.0f} <= {half + 0.12 * cam['v']:.0f}")
+        if side == 'правая':
+            b.screenshot(shots / 'g12-edge.png')
+    check('карта: нет ошибок в консоли', not b.errors(), str(b.errors()))
+
+
+STAMPS = "window.__dev.scene.children.list.filter(function(c){return c.frame && c.frame.name.indexOf('worm-plum-stamp-out')===0}).length"
+
+
+def t_model(b, shots):
+    """Модель червя: гладкая трубка без соединений, челюсти открываются и закрываются, размер челюсти задаёт съедобное."""
+    boot(b, URL)
+    b.eval("localStorage.clear(); 0")
+    boot(b, URL)
+    frames = b.eval("Object.keys(window.__dev.scene.textures.get('worm-plum').frames)")
+    ok = (not any('body-' in f or 'tail' in f for f in frames)) and all(any(n in f for f in frames) for n in ('stamp-out', 'jaw-top', 'jaw-bottom', 'maw', 'face-idle'))
+    check('модель: в атласе нет бусин и хвоста, есть круги тела, челюсти, зев, лицо', ok, ', '.join(frames[:5]))
+    n1 = b.eval(STAMPS)
+    b.eval('window.__dev.setTier(10); 0')
+    time.sleep(2.0)
+    n2 = b.eval(STAMPS)
+    check('модель: тело длиннее при росте, число кругов растёт вместе с длиной', n2 > n1 * 2.5, f'{n1} -> {n2} кругов')
+    # челюсти: в покое раскрыты наполовину, «жуёт» закрывает, «бросок» раскрывает
+    b.eval('window.__dev.setTier(1); 0')
+    b.eval("window.__dev.scene.prey.items.forEach(function(it){it.x += 100000}); 0")
+    time.sleep(0.7)
+    idle = state(b)['jaw']
+    check('челюсти в покое раскрыты примерно наполовину', 0.4 <= idle <= 0.68, f'{idle}')
+    b.eval("window.__dev.scene.worm.flash('chomp', 600, window.__dev.scene.time.now); 0")
+    time.sleep(0.25)
+    chomp = state(b)['jaw']
+    time.sleep(0.8)
+    b.eval("window.__dev.scene.worm.flash('open', 600, window.__dev.scene.time.now); 0")
+    time.sleep(0.3)
+    wide = state(b)['jaw']
+    check('челюсти: «жуёт» закрывает, «бросок» раскрывает', chomp < 0.25 and wide > 0.8, f'жуёт={chomp}, бросок={wide}')
+    b.screenshot(shots / 'g13-jaws.png')
+    # размер челюсти определяет, что можно съесть: помещающееся съедается, крупнее нет
+    res = {}
+    for name, k in (('small', 0.8), ('big', 1.4)):
+        b.eval("window.__dev.setPos(0, 700); window.__dev.autopilot(false); 0")
+        b.eval("""(function(){var s=window.__dev.scene, mr=s.worm.mouthRadius, items=s.prey.items.filter(function(i){return !i.dying});
+                  items.forEach(function(i){i.x += 100000});
+                  var it=items[0]; it.x=300; it.y=700; it.baseY=700; it.vx=0; it.turnIn=1e9; it.kind='soil'; it.r=mr*%f; it.img.setScale(it.r/34);
+                  window.__test_prey = it; return 0})()""" % k)
+        e0 = state(b)['eaten']
+        time.sleep(1.6)
+        res[name] = (state(b)['eaten'] - e0, b.eval('window.__dev.scene.prey.items.indexOf(window.__test_prey) >= 0'))
+    check('размер челюсти: помещающаяся добыча съедается', res['small'][0] == 1 and not res['small'][1], str(res['small']))
+    check('размер челюсти: добыча крупнее челюстей не съедается', res['big'][0] == 0 and res['big'][1], str(res['big']))
+    check('модель: нет ошибок в консоли', not b.errors(), str(b.errors()))
+
+
+def t_prey(b, shots):
+    """Добыча зоны 1: жуки и червячки сверху, лапки перебирают кадры, за ползущими остаётся след; в небе ничего."""
+    boot(b, URL)
+    b.eval("localStorage.clear(); 0")
+    boot(b, URL)
+    frames = b.eval("Object.keys(window.__dev.scene.textures.get('props').frames)")
+    check('добыча: кадры жука и червячка сверху, по два шага', all(f in frames for f in ('z1-beetle-a', 'z1-beetle-b', 'z1-worm-a', 'z1-worm-b')), str(frames))
+    kinds = b.eval("(function(){var o={};window.__dev.scene.prey.items.forEach(function(it){o[it.species]=(o[it.species]||0)+1});return o})()")
+    check('добыча: есть и жуки, и червячки', kinds.get('beetle', 0) > 0 and kinds.get('worm', 0) > 0, str(kinds))
+    check('добыча: пока выход закрыт, вся добыча в земле (нет «воздушной»)',
+          b.eval("window.__dev.scene.prey.items.every(function(it){return it.kind==='soil'})"))
+    seen = set()
+    t0 = time.time()
+    while time.time() - t0 < 1.2:
+        seen |= set(b.eval("window.__dev.scene.prey.items.map(function(it){return it.img.frame.name.slice(-1)})"))
+        time.sleep(0.05)
+    check('добыча: лапки перебирают два кадра', seen >= {'a', 'b'}, str(seen))
+    time.sleep(2.5)
+    marks = b.eval("window.__dev.scene.children.list.filter(function(c){return c.texture && c.texture.key==='fx-dot' && c.visible && c.depth===-56}).length")
+    check('добыча: за ползущими остаётся след', marks >= 3, f'меток следа: {marks}')
+    b.screenshot(shots / 'g14-prey.png')
+    check('добыча: нет ошибок в консоли', not b.errors(), str(b.errors()))
+
+
 TESTS = {
     'boot': t_boot, 'growth': t_autopilot_growth, 'jump': t_jump, 'wings': t_wings, 'skins': t_skins,
     'sdk': t_sdk, 'lang': t_lang, 'audio': t_audio, 'tiers': t_tiers,
     'pause': t_pause, 'keyboard': t_keyboard, 'save': t_save, 'saveburst': t_save_burst, 'resize': t_resize, 'mobile': t_mobile,
     'guards': t_guards, 'hud': t_hud, 'canvas': t_canvas, 'legacy': t_legacy, 'nostorage': t_nostorage,
+    'surface': t_surface, 'world': t_world, 'model': t_model, 'prey': t_prey,
 }
 
 
