@@ -86,7 +86,7 @@ def unpack(zip_path):
     return dest
 
 
-def common_checks(b, site, shots, name, slug):
+def common_checks(b, site, shots, name, slug, on_select=None):
     t0 = time.time()
     b.wait_for("!!document.querySelector('canvas') && !document.getElementById('loader')", 40)
     check(f'{name}: игра запустилась, экран загрузки убран', True, f'за {time.time() - t0:.1f} с')
@@ -98,6 +98,12 @@ def common_checks(b, site, shots, name, slug):
     check(f'{name}: холст на весь экран 1280x720', size == [1280, 720], str(size))
     fps = b.eval(FPS_JS)
     check(f'{name}: частота кадров не ниже 30', fps >= 30, f'{fps:.0f} кадров/с')
+    # первый запуск: экран выбора персонажа (ready уже вызван), игрок выбирает клавишей
+    b.screenshot(shots / f'p-{slug}-select.png')
+    if on_select:
+        on_select()
+    b.key('Digit2')
+    time.sleep(0.9)
     # управление мышью и клавишами не ломает игру
     b.mouse(900, 500, 'move')
     time.sleep(0.6)
@@ -120,10 +126,15 @@ def run_with_sdk(root, shots):
         with Browser(1280, 720) as b:
             b.open(site.url)
             b.wait_for("window.__sdkLog && window.__sdkLog.indexOf('ready') >= 0", 40)
-            urls = common_checks(b, site, shots, 'с SDK', 'with-sdk')
+            def before_choice():
+                log0 = b.eval('window.__sdkLog')
+                check('с SDK: на экране выбора персонажа ready уже вызван, а start ещё нет (пп. 1.19.2, 1.19.3)',
+                      'ready' in log0 and 'start' not in log0, str(log0))
+
+            urls = common_checks(b, site, shots, 'с SDK', 'with-sdk', before_choice)
             log = b.eval('window.__sdkLog')
-            check('с SDK: порядок вызовов init -> getPlayer -> start -> ready', log[0] == 'init' and
-                  log.index('getPlayer') < log.index('ready') and 'start' in log, str(log))
+            check('с SDK: порядок вызовов init -> getPlayer -> ready -> start (после выбора персонажа)', log[0] == 'init' and
+                  log.index('getPlayer') < log.index('ready') < log.index('start'), str(log))
             check('с SDK: ready() вызван ровно один раз', log.count('ready') == 1, str(log.count('ready')))
             check('с SDK: язык интерфейса ru', b.eval('document.documentElement.lang') == 'ru')
             check('с SDK: реклама в начале и посреди игры не показывается', 'adv' not in log and 'rewarded' not in log)

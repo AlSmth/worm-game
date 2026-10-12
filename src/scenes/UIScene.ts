@@ -3,33 +3,40 @@ import { state } from '../core/state';
 import { controls } from '../core/controls';
 import { sfx } from '../core/audio';
 import { isCoarsePointer } from '../core/layout';
-import { t } from '../core/i18n';
+import { t, type TextKey } from '../core/i18n';
 import { platform } from '../platform/platform';
-import { save } from '../platform/save';
+import { save, TUTORIAL_EAT } from '../platform/save';
 
 const FONT = "'Trebuchet MS', 'Segoe UI', Verdana, Arial, sans-serif";
 const INK = 0x2b1b17;
 const ORANGE = 0xffb020;
-const HINT_SECONDS = 9;
+const BLUE = 0x4d8dff;
+/** Для вернувшегося игрока подсказка показывается коротко, для нового держится до первой съеденной добычи. */
+const HINT_RETURNING = 4;
+const HINT_NEW = 1e9;
 
 type Btn = { box: Phaser.GameObjects.Container; icon: Phaser.GameObjects.Graphics; bg: Phaser.GameObjects.Graphics };
+type LabelBtn = { box: Phaser.GameObjects.Container; bg: Phaser.GameObjects.Graphics; text: Phaser.GameObjects.Text; key: TextKey; color: number };
 
-/** Интерфейс поверх игры: шкала роста, кнопки паузы и звука, подсказка, окно паузы. Кнопки не меньше 52 CSS-px. */
+/** Интерфейс поверх игры: шкала роста, монеты, кнопки паузы и звука, подсказка, сообщения, меню паузы. Кнопки не меньше 52 CSS-px. */
 export class UIScene extends Phaser.Scene {
   private bar!: Phaser.GameObjects.Graphics;
   private tierText!: Phaser.GameObjects.Text;
+  private coinPlate!: Phaser.GameObjects.Graphics;
+  private coinIcon!: Phaser.GameObjects.Image;
+  private coinText!: Phaser.GameObjects.Text;
+  private shownCoins = -1;
   private pauseBtn!: Btn;
   private soundBtn!: Btn;
   private hint!: Phaser.GameObjects.Text;
   private toastText!: Phaser.GameObjects.Text;
   private toastKey: string | null = null;
-  private hintLeft = HINT_SECONDS;
+  private hintLeft = HINT_RETURNING;
   private overlay!: Phaser.GameObjects.Container;
   private overlayDim!: Phaser.GameObjects.Rectangle;
   private overlayTitle!: Phaser.GameObjects.Text;
-  private overlayBtn!: Phaser.GameObjects.Container;
-  private overlayBtnBg!: Phaser.GameObjects.Graphics;
-  private overlayBtnText!: Phaser.GameObjects.Text;
+  private resumeBtn!: LabelBtn;
+  private changeBtn!: LabelBtn;
   private last = { tier: -1, p: -1, w: -1 };
 
   constructor() {
@@ -39,6 +46,9 @@ export class UIScene extends Phaser.Scene {
   create(): void {
     this.bar = this.add.graphics().setDepth(10);
     this.tierText = this.add.text(0, 0, '1', this.textStyle(24, 5)).setOrigin(0.5).setDepth(12);
+    this.coinPlate = this.add.graphics().setDepth(10);
+    this.coinIcon = this.add.image(0, 0, 'treasure', 'treasure-coin').setDepth(12);
+    this.coinText = this.add.text(0, 0, '0', { ...this.textStyle(22, 4.5), color: '#ffe27a' }).setOrigin(0, 0.5).setDepth(12);
     this.pauseBtn = this.makeButton(() => this.togglePause());
     this.soundBtn = this.makeButton(() => this.toggleSound());
     this.hint = this.add
@@ -50,6 +60,7 @@ export class UIScene extends Phaser.Scene {
       .setOrigin(0.5, 0)
       .setDepth(13)
       .setAlpha(0);
+    this.hintLeft = save.data.tutorial & TUTORIAL_EAT ? HINT_RETURNING : HINT_NEW;
     this.buildOverlay();
     this.layoutAll();
     this.scale.on('resize', () => this.layoutAll());
@@ -57,6 +68,10 @@ export class UIScene extends Phaser.Scene {
     controls.onKey('Escape', () => this.togglePause());
     controls.onKey('KeyP', () => this.togglePause());
     controls.onKey('KeyM', () => this.toggleSound());
+    // персонаж выбран: если игра стояла на паузе (выбор открыт из меню), продолжаем
+    this.game.events.on('skin-chosen', () => {
+      if (state.paused) this.togglePause();
+    });
   }
 
   // ---------- построение ----------
@@ -80,6 +95,7 @@ export class UIScene extends Phaser.Scene {
     const icon = this.add.graphics();
     const box = this.add.container(0, 0, [bg, icon]).setDepth(15);
     box.on('pointerdown', () => {
+      if (state.selecting) return;
       sfx.unlock();
       sfx.play('ui');
       onClick();
@@ -87,19 +103,26 @@ export class UIScene extends Phaser.Scene {
     return { box, icon, bg };
   }
 
+  private makeLabelButton(key: TextKey, color: number, onClick: () => void): LabelBtn {
+    const bg = this.add.graphics();
+    const text = this.add.text(0, 0, '', this.textStyle(26, 5)).setOrigin(0.5);
+    const box = this.add.container(0, 0, [bg, text]);
+    box.on('pointerdown', () => {
+      if (state.selecting) return;
+      sfx.unlock();
+      sfx.play('ui');
+      onClick();
+    });
+    return { box, bg, text, key, color };
+  }
+
   private buildOverlay(): void {
     this.overlayDim = this.add.rectangle(0, 0, 10, 10, 0x000000, 0.58).setOrigin(0, 0).setInteractive();
     this.overlayTitle = this.add.text(0, 0, '', this.textStyle(46, 8)).setOrigin(0.5);
-    this.overlayBtnBg = this.add.graphics();
-    this.overlayBtnText = this.add.text(0, 0, '', this.textStyle(26, 5)).setOrigin(0.5);
-    this.overlayBtn = this.add.container(0, 0, [this.overlayBtnBg, this.overlayBtnText]);
-    this.overlayBtn.on('pointerdown', () => {
-      sfx.unlock();
-      sfx.play('ui');
-      this.togglePause();
-    });
+    this.resumeBtn = this.makeLabelButton('resume', ORANGE, () => this.togglePause());
+    this.changeBtn = this.makeLabelButton('menu_change', BLUE, () => this.game.events.emit('open-select'));
     this.overlay = this.add
-      .container(0, 0, [this.overlayDim, this.overlayTitle, this.overlayBtn])
+      .container(0, 0, [this.overlayDim, this.overlayTitle, this.resumeBtn.box, this.changeBtn.box])
       .setDepth(50)
       .setVisible(false);
   }
@@ -126,10 +149,18 @@ export class UIScene extends Phaser.Scene {
     this.drawPauseIcon();
     this.drawSoundIcon();
 
+    // плашка с монетами под шкалой роста
+    const coinY = m + 2 * 24 * u + 12 * u + 16 * u;
+    this.coinIcon.setScale((30 * u) / 64).setPosition(m + 16 * u, coinY);
+    this.coinText.setStyle({ ...this.textStyle(22, 4.5), color: '#ffe27a' });
+    this.coinText.setPosition(m + 38 * u, coinY + 1 * u);
+    this.shownCoins = -1; // подпись и плашка перерисуются
+
     // область, занятая интерфейсом: игра не принимает там касания за управление
     state.uiRects = [
       { x: x2 - 4 * u, y: 0, w: W - x2 + 4 * u, h: m + bs + 8 * u },
       { x: 0, y: 0, w: this.barWidth() + 2 * 24 * u + 3 * m, h: m + 52 * u },
+      { x: 0, y: coinY - 20 * u, w: 160 * u, h: 40 * u },
     ];
 
     // подсказка внизу по центру
@@ -143,19 +174,23 @@ export class UIScene extends Phaser.Scene {
     this.toastText.setPosition(W / 2, 84 * u);
     this.toastKey = null; // подпись перерисуется на новом языке и размере
 
-    // окно паузы
+    // меню паузы: заголовок и две кнопки друг под другом
     this.overlayDim.setSize(W, H);
     this.overlayTitle.setStyle(this.textStyle(46, 8));
-    this.overlayTitle.setText(t('pause')).setPosition(W / 2, H / 2 - 56 * u);
-    this.overlayBtnText.setStyle(this.textStyle(26, 5));
-    this.overlayBtnText.setText(t('resume'));
-    const bw = Math.max(220 * u, this.overlayBtnText.width + 60 * u);
+    this.overlayTitle.setText(t('pause')).setPosition(W / 2, H / 2 - 92 * u);
     const bh = 62 * u;
-    this.overlayBtnBg.clear();
-    this.fillButton(this.overlayBtnBg, -bw / 2, -bh / 2, bw, bh, 16 * u);
-    this.overlayBtn.setPosition(W / 2, H / 2 + 36 * u);
-    this.overlayBtn.setSize(bw, bh);
-    this.overlayBtn.setInteractive(new Phaser.Geom.Rectangle(-bw / 2, -bh / 2, bw, bh), Phaser.Geom.Rectangle.Contains);
+    let y = H / 2 + 6 * u;
+    for (const b of [this.resumeBtn, this.changeBtn]) {
+      b.text.setStyle(this.textStyle(26, 5));
+      b.text.setText(t(b.key));
+      const bw = Math.max(240 * u, b.text.width + 60 * u);
+      b.bg.clear();
+      this.fillButton(b.bg, -bw / 2, -bh / 2, bw, bh, 16 * u, b.color);
+      b.box.setPosition(W / 2, y);
+      b.box.setSize(bw, bh);
+      b.box.setInteractive(new Phaser.Geom.Rectangle(-bw / 2, -bh / 2, bw, bh), Phaser.Geom.Rectangle.Contains);
+      y += bh + 14 * u;
+    }
 
     this.last = { tier: -1, p: -1, w: -1 };
   }
@@ -164,10 +199,10 @@ export class UIScene extends Phaser.Scene {
     return Math.min(300 * this.u, this.scale.width * 0.36);
   }
 
-  private fillButton(g: Phaser.GameObjects.Graphics, x: number, y: number, w: number, h: number, r: number): void {
+  private fillButton(g: Phaser.GameObjects.Graphics, x: number, y: number, w: number, h: number, r: number, color = ORANGE): void {
     const u = this.u;
     g.fillStyle(INK, 1).fillRoundedRect(x - 3 * u, y - 3 * u, w + 6 * u, h + 6 * u, r + 3 * u);
-    g.fillStyle(ORANGE, 1).fillRoundedRect(x, y, w, h, r);
+    g.fillStyle(color, 1).fillRoundedRect(x, y, w, h, r);
     g.fillStyle(0xffffff, 0.35).fillRoundedRect(x + 4 * u, y + 4 * u, w - 8 * u, h * 0.38, r * 0.7);
   }
 
@@ -227,6 +262,7 @@ export class UIScene extends Phaser.Scene {
 
   // ---------- действия ----------
   private togglePause(): void {
+    if (state.selecting) return;
     state.paused = !state.paused;
     platform.gameplay(!state.paused);
     this.overlay.setVisible(state.paused);
@@ -250,15 +286,32 @@ export class UIScene extends Phaser.Scene {
       this.last = { tier: state.tier, p, w: bw };
       this.drawBar(p, bw, u);
     }
-    // подсказка гаснет через несколько секунд
-    if (this.hintLeft > 0 && !state.paused) {
+    // монеты: число и плашка по ширине числа, при выигрыше «подпрыгивают»
+    if (this.shownCoins !== state.coins) {
+      const gained = this.shownCoins >= 0 && state.coins > this.shownCoins;
+      this.shownCoins = state.coins;
+      this.coinText.setText(String(state.coins));
+      this.drawCoinPlate();
+      if (gained) {
+        this.tweens.killTweensOf([this.coinIcon, this.coinText]);
+        const base = (30 * u) / 64;
+        this.coinIcon.setScale(base * 1.45);
+        this.tweens.add({ targets: this.coinIcon, scale: base, duration: 260, ease: 'Back.easeOut' });
+        this.coinText.setScale(1.3);
+        this.tweens.add({ targets: this.coinText, scale: 1, duration: 260, ease: 'Back.easeOut' });
+      }
+    }
+    // подсказка: новому игроку висит до первой съеденной добычи, потом гаснет; не мешает окну выбора
+    if (save.data.tutorial & TUTORIAL_EAT) this.hintLeft = Math.min(this.hintLeft, 2.5);
+    if (this.hintLeft > 0 && !state.paused && !state.selecting) {
       this.hintLeft -= delta / 1000;
       this.hint.setAlpha(Math.max(0, Math.min(1, this.hintLeft / 1.5)));
     }
-    // короткое сообщение (выход на поверхность закрыт или открылся)
+    this.hint.setVisible(!state.selecting);
+    // короткое сообщение (выход на поверхность закрыт или открылся, обучение)
     const toast = state.toast;
     if (toast.key && toast.left > 0) {
-      if (!state.paused) toast.left -= delta / 1000;
+      if (!state.paused && !state.selecting) toast.left -= delta / 1000;
       if (this.toastKey !== toast.key) {
         this.toastKey = toast.key;
         this.toastText.setText(t(toast.key));
@@ -268,6 +321,18 @@ export class UIScene extends Phaser.Scene {
       this.toastText.setAlpha(0);
       this.toastKey = null;
     }
+  }
+
+  private drawCoinPlate(): void {
+    const u = this.u;
+    const m = 14 * u;
+    const y = m + 2 * 24 * u + 12 * u + 16 * u;
+    const w = 52 * u + this.coinText.width;
+    const g = this.coinPlate;
+    g.clear();
+    g.fillStyle(INK, 1).fillRoundedRect(m - 3 * u, y - 18 * u - 3 * u, w + 6 * u, 36 * u + 6 * u, 21 * u);
+    g.fillStyle(0x4a2f1f, 1).fillRoundedRect(m, y - 18 * u, w, 36 * u, 18 * u);
+    g.fillStyle(0xffffff, 0.14).fillRoundedRect(m + 4 * u, y - 15 * u, w - 8 * u, 11 * u, 6 * u);
   }
 
   private drawBar(p: number, bw: number, u: number): void {

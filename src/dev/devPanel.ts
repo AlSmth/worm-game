@@ -10,6 +10,9 @@ export interface DevApi {
   autopilot(on: boolean): void;
   setPos(x: number, y: number): void;
   world(): { width: number; surfaceTier: number };
+  addCoins(n: number): void;
+  openSelect(): void;
+  resetTutorial(): void;
   resetSave(): void;
 }
 
@@ -25,6 +28,7 @@ export function mountDevPanel(api: DevApi): void {
     '<div>Персонаж: ' + btn('A', 'skin:peach') + btn('B', 'skin:salad') + btn('C', 'skin:plum') + '</div>' +
     '<div>Крылья: ' + [0, 1, 2, 3, 4, 5].map((n) => btn(String(n), 'wings:' + n)).join('') + '</div>' +
     '<div>Рост: ' + btn('+10', 'grow:10') + btn('+100', 'grow:100') + btn('тир +1', 'tier:+1') + btn('тир −1', 'tier:-1') + '</div>' +
+    '<div>Монеты: ' + btn('+10', 'coins:10') + btn('+100', 'coins:100') + btn('выбор червя', 'select') + btn('обучение заново', 'tut') + '</div>' +
     '<div>' + btn('автопилот', 'auto') + btn('сброс сохранения', 'reset') + '</div>';
   let auto = false;
   let tier = 1;
@@ -35,6 +39,9 @@ export function mountDevPanel(api: DevApi): void {
     if (kind === 'skin') api.setSkin(arg as SkinId);
     else if (kind === 'wings') api.setUpgrade('jump', Number(arg));
     else if (kind === 'grow') api.addGrowth(Number(arg));
+    else if (kind === 'coins') api.addCoins(Number(arg));
+    else if (kind === 'select') api.openSelect();
+    else if (kind === 'tut') api.resetTutorial();
     else if (kind === 'tier') {
       tier = Number(api.state().tier) + Number(arg);
       api.setTier(tier);
@@ -51,6 +58,6 @@ export function mountDevPanel(api: DevApi): void {
   const info = el.querySelector('#dv-info') as HTMLElement;
   window.setInterval(() => {
     const s = api.state();
-    info.textContent = `тир ${s.tier} · ${s.fps} fps · ${s.skin} · крылья ${s.wings}`;
+    info.textContent = `тир ${s.tier} · ${s.fps} fps · ${s.skin} · крылья ${s.wings} · монет ${s.coins}`;
   }, 300);
 }

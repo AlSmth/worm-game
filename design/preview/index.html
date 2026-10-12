@@ -86,6 +86,16 @@
   .preyrow { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; margin-top: 8px; }
   .preyrow canvas { display: block; width: 100%; height: 190px; border-radius: 10px; border: 2px solid #120b09; }
 
+  canvas.zone { display: block; width: 100%; height: 520px; border-radius: 12px; border: 2px solid #120b09; background: #2b1b17; }
+  .z1layers { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-top: 12px; }
+  .z1layers figure { margin: 0; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 8px; }
+  .z1layers canvas { display: block; width: 100%; height: 150px; border-radius: 8px; background: #5E3C2A; }
+  .z1layers figcaption { font-size: 12px; color: var(--muted); margin-top: 4px; }
+  .z1strip { display: flex; gap: 14px; flex-wrap: wrap; align-items: flex-end; margin-top: 12px; padding: 12px; background: #3a2418; border-radius: 12px; border: 2px solid #120b09; }
+  .z1strip figure { margin: 0; text-align: center; font-size: 11px; color: #e9d7c0; }
+  .z1strip canvas { display: block; margin: 0 auto 4px; }
+  .compact .zone1, .solo .zone1, .only-prog .zone1 { display: none; }
+
   .boards { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
   .box { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 12px 16px 14px; }
   .box h4 { margin: 0 0 6px; font-size: 15px; }
@@ -155,6 +165,14 @@
     <div class="preyrow" id="preyrow"></div>
   </section>
 
+  <section class="zone1">
+    <h3>Зона 1 «Под землёй»: фон, сокровища, эффекты</h3>
+    <p>Фон из трёх слоёв почвы с параллаксом (дальний мягкий, средний с камнями и корнями, ближний с камешками и ракушками), кромка с травой и облака. Почва не растёт вместе с червём: по мере роста камера отъезжает, и земля становится мельче. Сокровища дают монеты: монета, четыре самоцвета, два сундука.</p>
+    <canvas class="zone" id="z1"></canvas>
+    <div class="z1layers" id="z1layers"></div>
+    <div class="z1strip" id="z1strip"></div>
+  </section>
+
   <section id="variants"></section>
 
   <h3>Стайлборд</h3>
@@ -186,6 +204,10 @@
   var BUST = Date.now();
   var EXPRS = [['idle', 'Спокойный', 0.53], ['open', 'Бросок', 1], ['chomp', 'Жуёт', 0], ['hurt', 'Оглушён', 0.1], ['happy', 'Рад', 0.8]];
   var PREY = ['z1-beetle-a', 'z1-beetle-b', 'z1-worm-a', 'z1-worm-b'];
+  var Z1_BG = ['bg-z1-far', 'bg-z1-mid', 'bg-z1-near', 'bg-z1-edge', 'bg-z1-clouds'];
+  var Z1_TREASURE = ['treasure-coin', 'treasure-gem', 'treasure-chest-small', 'treasure-chest-big'];
+  var Z1_FX = ['fx-star', 'fx-dot', 'fx-tierup-ring', 'fx-glow', 'fx-eat-pop', 'fx-dust-poof', 'fx-dirt-chunk', 'fx-coin-sparkle', 'fx-arrow'];
+  var GEMS = [['рубин', '#ff6b7d'], ['изумруд', '#57e08a'], ['сапфир', '#58a6ff'], ['аметист', '#c58bff']];
   var FAR_SCALE = 0.86;
   var st = { segs: 8, thick: 1, jaw: 0.53, expr: 'idle', wave: true, prey: true, fit: true, bg: 'ground',
              wings: 0, anchors: false, flap: true, folded: false, pick: null };
@@ -197,6 +219,9 @@
   function wurl(id, name) { return '../worm/' + id + '/worm-' + id + '-' + name + '.svg?v=' + BUST; }
   function uurl(name) { return '../upgrades/wings/' + name + '.svg?v=' + BUST; }
   function purl(name) { return '../zone-1-underground/food/' + name + '.svg?v=' + BUST; }
+  function zurl(name) { return '../zone-1-underground/background/' + name + '.svg?v=' + BUST; }
+  function turl(name) { return '../treasure/' + name + '.svg?v=' + BUST; }
+  function furl(name) { return '../effects/' + name + '.svg?v=' + BUST; }
   function wingName(t) {
     var w = WT.filter(function (x) { return x.tier === t; })[0];
     return w ? 'крылья ' + t + ': ' + w.name : '';
@@ -211,6 +236,9 @@
     });
     WT.forEach(function (t) { ['back', 'front'].forEach(function (l) { list.push(['wing' + t.tier + l, uurl('wings-t' + t.tier + '-' + l)]); }); });
     PREY.forEach(function (n) { list.push([n, purl(n)]); });
+    Z1_BG.forEach(function (n) { list.push([n, zurl(n)]); });
+    Z1_TREASURE.forEach(function (n) { list.push([n, turl(n)]); });
+    Z1_FX.forEach(function (n) { list.push([n, furl(n)]); });
     var left = list.length;
     list.forEach(function (it) {
       var im = new Image();
@@ -517,7 +545,103 @@
     });
   }
 
-  function renderAll() { renderCards(); renderProg(); paintPick(); renderPrey(); }
+  // умножение цвета: так игра красит самоцветы и частицы
+  function tinted(im, color, size) {
+    var cv = document.createElement('canvas'); cv.width = cv.height = size;
+    var x = cv.getContext('2d');
+    x.drawImage(im, 0, 0, size, size);
+    x.globalCompositeOperation = 'multiply'; x.fillStyle = color; x.fillRect(0, 0, size, size);
+    x.globalCompositeOperation = 'destination-in'; x.drawImage(im, 0, 0, size, size);
+    return cv;
+  }
+  function fillPattern(ctx, im, ox, oy, W, H, rep) {
+    if (!im || !im.naturalWidth) { return; }
+    ctx.save(); ctx.translate(ox, oy); ctx.fillStyle = ctx.createPattern(im, rep || 'repeat'); ctx.fillRect(-ox, -oy, W, H); ctx.restore();
+  }
+
+  // Сцена зоны 1 целиком: небо с облаками, кромка, слои почвы, затемнение глубиной, червь, добыча и сокровища
+  function renderZone1() {
+    var cv = $('z1'); if (!cv) { return; }
+    var c = sizeCanvas(cv), ctx = c.ctx, W = c.w, H = c.h, y0 = 190, sh = IMG['bg-z1-clouds'];
+    var sky = ctx.createLinearGradient(0, 0, 0, y0); sky.addColorStop(0, '#3f9cff'); sky.addColorStop(1, '#d9f2ff');
+    ctx.fillStyle = sky; ctx.fillRect(0, 0, W, y0 + 4);
+    if (sh && sh.naturalWidth) { for (var x = -((T * 6) % 1024); x < W; x += 1024) { ctx.drawImage(sh, x, 10, 1024, 256); } }
+    ctx.save(); ctx.beginPath(); ctx.rect(0, y0, W, H - y0); ctx.clip();
+    fillPattern(ctx, IMG['bg-z1-far'], -40, y0, W + 40, H);
+    fillPattern(ctx, IMG['bg-z1-mid'], -120, y0 - 100, W + 120, H);
+    fillPattern(ctx, IMG['bg-z1-near'], -300, y0 - 200, W + 300, H);
+    var dg = ctx.createLinearGradient(0, y0, 0, H); dg.addColorStop(0, 'rgba(18,8,6,0)'); dg.addColorStop(1, 'rgba(18,8,6,.8)');
+    ctx.fillStyle = dg; ctx.fillRect(0, y0, W, H - y0);
+    ctx.restore();
+    var ed = IMG['bg-z1-edge'];
+    if (ed && ed.naturalWidth) { for (var ex = 0; ex < W; ex += 1024) { ctx.drawImage(ed, ex, y0 - 190, 1024, 512); } }
+    // добыча и сокровища
+    var pr = [['z1-beetle-' + (Math.floor(T * 7) % 2 ? 'a' : 'b'), 120, y0 + 120, 0.8], ['z1-worm-' + (Math.floor(T * 5) % 2 ? 'a' : 'b'), 700, y0 + 90, 0.9],
+              ['z1-beetle-' + (Math.floor(T * 7) % 2 ? 'b' : 'a'), 920, y0 + 210, 1.1], ['z1-worm-a', 220, y0 + 260, 0.7]];
+    pr.forEach(function (it) { var im = IMG[it[0]]; if (im && im.naturalWidth) { ctx.drawImage(im, it[1] - 64 * it[3], it[2] - 64 * it[3], 128 * it[3], 128 * it[3]); } });
+    var coin = IMG['treasure-coin'];
+    if (coin && coin.naturalWidth) {
+      [[380, y0 + 70], [430, y0 + 90], [820, y0 + 160]].forEach(function (p, i) {
+        var sx = Math.max(0.12, Math.abs(Math.cos(T * 3 + i)));
+        ctx.save(); ctx.translate(p[0], p[1]); ctx.scale(sx, 1); ctx.drawImage(coin, -24, -24, 48, 48); ctx.restore();
+      });
+    }
+    var gem = IMG['treasure-gem'];
+    if (gem && gem.naturalWidth) { ctx.drawImage(tinted(gem, GEMS[2][1], 64), 560, y0 + 250, 48, 48); ctx.drawImage(tinted(gem, GEMS[0][1], 64), 1000, y0 + 120, 44, 44); }
+    var chs = IMG['treasure-chest-small'];
+    if (chs && chs.naturalWidth) { ctx.drawImage(chs, 640, y0 + 280, 96, 96); }
+    // червь
+    var v = byId(st.pick || 'plum');
+    ctx.save(); ctx.translate(Math.min(W * 0.62, W - 150), y0 + 150); ctx.scale(0.8, 0.8);
+    drawWorm(ctx, v, opts({ segs: 6, wave: true, expr: 'open', jaw: 1, wings: 0, prey: false, anchors: false, t: T }));
+    ctx.restore();
+    // подписи слоёв
+    ctx.fillStyle = 'rgba(255,255,255,.85)'; ctx.font = '12px system-ui';
+    ctx.fillText('сцена зоны 1: небо, кромка, три слоя почвы и затемнение глубиной (без параллакса на статичном кадре)', 12, H - 10);
+  }
+
+  function renderZone1Parts() {
+    var host = $('z1layers');
+    if (host && !host.children.length) {
+      var names = [['bg-z1-far', 'дальний слой (1024×512): пласты и пятна, сплошной фон'], ['bg-z1-mid', 'средний слой (1024×1024): камни и корни'],
+                   ['bg-z1-near', 'ближний слой (1024×1024): камешки и ракушки'], ['bg-z1-edge', 'кромка с травой (1024×512): линия земли на y = 190'],
+                   ['bg-z1-clouds', 'облака (2048×512)']];
+      host.innerHTML = names.map(function (n) { return '<figure><canvas data-n="' + n[0] + '"></canvas><figcaption>' + n[1] + '</figcaption></figure>'; }).join('');
+    }
+    if (host) {
+      Array.prototype.forEach.call(host.querySelectorAll('canvas'), function (cv) {
+        var c = sizeCanvas(cv), im = IMG[cv.dataset.n];
+        if (cv.dataset.n === 'bg-z1-far') { c.ctx.fillStyle = '#5E3C2A'; c.ctx.fillRect(0, 0, c.w, c.h); }
+        if (cv.dataset.n === 'bg-z1-clouds') { var g = c.ctx.createLinearGradient(0, 0, 0, c.h); g.addColorStop(0, '#6FB5FF'); g.addColorStop(1, '#D9F2FF'); c.ctx.fillStyle = g; c.ctx.fillRect(0, 0, c.w, c.h); }
+        if (im && im.naturalWidth) {
+          var k = Math.min(c.w / im.naturalWidth, c.h / im.naturalHeight);
+          c.ctx.drawImage(im, 0, 0, im.naturalWidth * k, im.naturalHeight * k);
+        }
+      });
+    }
+    var strip = $('z1strip');
+    if (strip && !strip.children.length) {
+      var parts = [['coin', 'монета (вращается в коде)', 64, 64], ['gem0', GEMS[0][0], 64, 64], ['gem1', GEMS[1][0], 64, 64], ['gem2', GEMS[2][0], 64, 64], ['gem3', GEMS[3][0], 64, 64],
+                   ['chs', 'малый сундук', 128, 128], ['chb', 'большой сундук', 192, 192]];
+      Z1_FX.forEach(function (n) { parts.push([n, n.replace('fx-', ''), 64, 64]); });
+      strip.innerHTML = parts.map(function (p) { return '<figure><canvas data-k="' + p[0] + '" width="' + p[2] + '" height="' + p[3] + '" style="width:' + p[2] + 'px;height:' + p[3] + 'px"></canvas>' + p[1] + '</figure>'; }).join('');
+    }
+    if (strip) {
+      Array.prototype.forEach.call(strip.querySelectorAll('canvas'), function (cv) {
+        var x = cv.getContext('2d'), k = cv.dataset.k, w = cv.width, h = cv.height; x.clearRect(0, 0, w, h);
+        var im = null;
+        if (k === 'coin') { im = IMG['treasure-coin']; var sx = Math.max(0.12, Math.abs(Math.cos(T * 3))); x.save(); x.translate(w / 2, h / 2); x.scale(sx, 1); if (im && im.naturalWidth) { x.drawImage(im, -w / 2, -h / 2, w, h); } x.restore(); return; }
+        if (k.indexOf('gem') === 0) { im = IMG['treasure-gem']; if (im && im.naturalWidth) { x.drawImage(tinted(im, GEMS[+k.slice(3)][1], 64), 0, 0, w, h); } return; }
+        if (k === 'chs') { im = IMG['treasure-chest-small']; } else if (k === 'chb') { im = IMG['treasure-chest-big']; } else { im = IMG[k]; }
+        if (im && im.naturalWidth) {
+          var tint = { 'fx-dirt-chunk': '#8a5a3a', 'fx-dust-poof': '#f0d9b5', 'fx-star': '#ffd23f', 'fx-glow': '#ffd23f' }[k];
+          if (tint) { x.drawImage(tinted(im, tint, 128), 0, 0, w, h); } else { x.drawImage(im, 0, 0, w, h); }
+        }
+      });
+    }
+  }
+
+  function renderAll() { renderCards(); renderProg(); paintPick(); renderPrey(); renderZone1(); renderZone1Parts(); }
 
   // ---------- элементы управления ----------
   $('exprs').innerHTML = EXPRS.map(function (e) { return '<button data-e="' + e[0] + '"' + (e[0] === st.expr ? ' class="on"' : '') + '>' + e[1] + '</button>'; }).join('');
@@ -583,6 +707,7 @@
       if (st.wings && st.flap) { renderStages(); }
       if (st.flap) { renderProg(); }
       tickPrey(1 / 30);
+      renderZone1(); renderZone1Parts();
     }
     requestAnimationFrame(tick);
   }

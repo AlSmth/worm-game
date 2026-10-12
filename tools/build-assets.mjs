@@ -29,6 +29,17 @@ const ATLASES = [
   { name: 'worm-plum', scale: 1, dir: 'design/worm/plum' },
   { name: 'wings', scale: 0.75, dir: 'design/upgrades/wings' },
   { name: 'props', scale: 1, dir: 'design/zone-1-underground/food' },
+  { name: 'treasure', scale: 1, dir: 'design/treasure' },
+  { name: 'fx', scale: 1, dir: 'design/effects' },
+];
+
+/** Одиночные картинки без обрезки и упаковки (фоны и повторяющиеся плитки): PNG целиком, размер степень двойки. */
+const SINGLES = [
+  { name: 'bg-z1-far', file: 'design/zone-1-underground/background/bg-z1-far.svg', scale: 1 },
+  { name: 'bg-z1-mid', file: 'design/zone-1-underground/background/bg-z1-mid.svg', scale: 1 },
+  { name: 'bg-z1-near', file: 'design/zone-1-underground/background/bg-z1-near.svg', scale: 1 },
+  { name: 'bg-z1-edge', file: 'design/zone-1-underground/background/bg-z1-edge.svg', scale: 1 },
+  { name: 'bg-z1-clouds', file: 'design/zone-1-underground/background/bg-z1-clouds.svg', scale: 0.5 },
 ];
 
 const pot = (n) => 2 ** Math.ceil(Math.log2(Math.max(n, 1)));
@@ -128,6 +139,22 @@ function buildAtlas(cfg) {
   return { name: cfg.name, frames: frames.length, size: `${pw}x${ph}`, bytes: statSync(pngPath).size, scale: cfg.scale };
 }
 
+function buildSingle(cfg) {
+  const src = join(ROOT, cfg.file);
+  const pngPath = join(OUT, `${cfg.name}.png`);
+  const render = () => {
+    const resvg = new Resvg(readFileSync(src, 'utf8'), { fitTo: { mode: 'zoom', value: cfg.scale }, font: { loadSystemFonts: false } });
+    return PNG.sync.read(resvg.render().asPng());
+  };
+  if (!FORCE && existsSync(pngPath) && statSync(pngPath).mtimeMs > newestMtime([src, SELF])) {
+    const png = PNG.sync.read(readFileSync(pngPath));
+    return { name: cfg.name, skipped: true, w: png.width, h: png.height };
+  }
+  const png = render();
+  writeFileSync(pngPath, PNG.sync.write(png, { colorType: 6, deflateLevel: 9 }));
+  return { name: cfg.name, w: png.width, h: png.height, bytes: statSync(pngPath).size };
+}
+
 mkdirSync(OUT, { recursive: true });
 const info = {};
 let total = 0;
@@ -138,6 +165,15 @@ for (const cfg of ATLASES) {
   const jsonPath = join(OUT, `${cfg.name}.json`);
   const meta = JSON.parse(readFileSync(jsonPath, 'utf8')).meta;
   info[cfg.name] = { scale: meta.scale, w: meta.size.w, h: meta.size.h };
+  total += statSync(join(OUT, `${cfg.name}.png`)).size;
+}
+for (const cfg of SINGLES) {
+  const r = buildSingle(cfg);
+  const isPot = (n) => (n & (n - 1)) === 0;
+  if (!isPot(r.w) || !isPot(r.h)) throw new Error(`${cfg.name}: размер ${r.w}x${r.h} не степень двойки (нужно для повторяющейся плитки)`);
+  if (r.skipped) console.log(`  ${cfg.name}: без изменений`);
+  else console.log(`  ${cfg.name}: ${r.w}x${r.h}, ${(r.bytes / 1024).toFixed(0)} КБ`);
+  info[cfg.name] = { scale: cfg.scale, w: r.w, h: r.h, single: true };
   total += statSync(join(OUT, `${cfg.name}.png`)).size;
 }
 writeFileSync(join(OUT, 'atlas-info.json'), JSON.stringify(info, null, 1));

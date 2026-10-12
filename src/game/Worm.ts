@@ -113,6 +113,9 @@ export class Worm {
   private wingOpen = 0;
   private jawOpen: number = JAW_BY_EXPR.idle;
   private nodes: Node[] = [];
+  private radii: number[] = [];
+  /** «Глотки»: утолщения, бегущие по телу от головы к хвосту после укуса. d в px при масштабе 1. */
+  private gulps: Array<{ d: number; a: number }> = [];
 
   constructor(private scene: Phaser.Scene, skin: SkinId, x: number, y: number) {
     this.skin = skin;
@@ -231,6 +234,19 @@ export class Worm {
     return { x: this.x + ox * c - oy * s, y: this.y + ox * s + oy * c };
   }
 
+  /** Проглоченный кусок бежит по телу: мультяшное утолщение от головы к хвосту. */
+  gulp(strength = 0.16): void {
+    this.gulps.push({ d: 0, a: strength });
+    if (this.gulps.length > 6) this.gulps.shift();
+  }
+
+  /** Неподвижная поза для портрета (экран выбора): тело не двигается, лицо и челюсти живут. Позицию задают через reset(). */
+  hold(dt: number, now: number): void {
+    this.scale = this.targetScale;
+    this.updateExpression(now);
+    this.layout(dt, now);
+  }
+
   // ---------- выражение лица ----------
   /** Постоянное выражение: «открыт» рядом с добычей, иначе спокойный. */
   setHint(e: Expr): void {
@@ -250,6 +266,12 @@ export class Worm {
     this.pushTrail();
     this.updateExpression(now);
     this.layout(dt, now);
+    for (let i = this.gulps.length - 1; i >= 0; i--) {
+      const g = this.gulps[i];
+      g.d += 420 * dt;
+      g.a *= 1 - 0.4 * dt;
+      if (g.d > this.segs * rig.step + 140) this.gulps.splice(i, 1);
+    }
   }
 
   private move(dt: number, steer: Steer): void {
@@ -353,6 +375,10 @@ export class Worm {
     if (d < rig.headBulge) r = rig.headRadius + (rig.bodyRadius - rig.headRadius) * smooth(d / rig.headBulge);
     const ts = rig.taperFrom * L;
     if (d > ts && L > ts) r += (rig.tailRadius - r) * smooth((d - ts) / (L - ts));
+    for (const g of this.gulps) {
+      const x = (d - g.d) / 55;
+      r += rig.bodyRadius * g.a * Math.exp(-x * x);
+    }
     return r;
   }
 
@@ -413,6 +439,8 @@ export class Worm {
     const vx0 = cam.scrollX + cam.width / 2 - vw / 2;
     const vy0 = cam.scrollY + cam.height / 2 - vh / 2;
     const pad = (rig.bodyRadius + rig.outline) * 1.3 * S;
+    const radii = this.radii;
+    for (let k = 0; k < count; k++) radii[k] = this.radiusAt(Math.min(k * sp, L), L);
     const passes = rig.passes as string[];
     for (let p = 0; p < passes.length; p++) {
       const pool = this.pools[p];
@@ -423,7 +451,7 @@ export class Worm {
       while (pool.length > count) pool.pop()?.destroy();
       const outline = name === 'out';
       for (let k = 0; k < count; k++) {
-        const r = this.radiusAt(Math.min(k * sp, L), L);
+        const r = radii[k];
         const n = nodes[k];
         const seen = n.x > vx0 - pad && n.x < vx0 + vw + pad && n.y > vy0 - pad && n.y < vy0 + vh + pad;
         const img = pool[k];

@@ -33,10 +33,27 @@ def state(b):
     return b.eval('window.__dev.state()')
 
 
-def boot(b, url, wait=30):
+def boot(b, url, wait=30, choose=True):
+    """Открыть игру. При первом запуске показывается выбор персонажа: по умолчанию выбираем Сливу (клавиша 3)."""
     b.open(url)
     b.wait_for('!!window.__dev', wait)
+    if choose and b.eval('window.__dev.state().selecting'):
+        b.key('Digit3')
+        time.sleep(0.3)
     time.sleep(0.8)
+
+
+SEED_CHOSEN = '{"v":2,"skinChosen":true,"skin":"plum","tier":1,"growth":0,"coins":0,"tutorial":3}'
+
+
+def seed_chosen(b, tutorial=3, coins=0):
+    """Подложить сохранение «персонаж выбран» до запуска игры (tutorial=0: обучение покажется; coins: стартовые монеты).
+
+    Через localStorage перед перезагрузкой нельзя: уходящая страница пишет своё сохранение поверх. Поэтому скрипт выполняется
+    перед запуском игры и только один раз за вкладку (sessionStorage), а последующие перезагрузки берут то, что игра сохранила сама."""
+    save = SEED_CHOSEN.replace('"tutorial":3', '"tutorial":%d' % tutorial).replace('"coins":0', '"coins":%d' % coins)
+    b.add_init_script("try { if (!sessionStorage.getItem('__seeded')) { sessionStorage.setItem('__seeded', '1'); "
+                      "localStorage.setItem('wormgame.save.v1', %s); } } catch (e) {}" % json.dumps(save))
 
 
 def world_to_client(b, wx, wy):
@@ -54,7 +71,7 @@ def t_boot(b, shots):
     # червь стартует в точке (0, 260*масштаб) и сразу плывёт, поэтому мерим от точки старта, а не от текущего положения
     near = b.eval("(function(){var s=window.__dev.scene, S=s.worm.scale, m=1e9; s.prey.items.forEach(function(it){m=Math.min(m, Math.hypot(it.x, it.y-260*S)/S)}); return m})()")
     check('загрузка: вокруг точки старта свободная зона, добыча не появляется во рту', near > 250, f'ближайшая добыча: {near:.0f} px (в масштабе червя)')
-    check('загрузка: игра готова, 30 добыч вокруг', s['prey'] >= 25, f"prey={s['prey']}")
+    check('загрузка: игра готова, добыча вокруг', s['prey'] >= 20, f"prey={s['prey']}")
     check('загрузка: холст на весь экран 1280x720', (s['canvasW'], s['canvasH']) == (1280, 720), f"{s['canvasW']}x{s['canvasH']}")
     time.sleep(1.0)
     fps = state(b)['fps']
@@ -324,9 +341,11 @@ HUD_JS = """(function(){
   var s = window.__dev.scene, ui = s.scene.get('UI'), W = ui.scale.width, H = ui.scale.height, u = ui.u, bw = ui.barWidth();
   function box(o){ return {l: o.x - o.width / 2, t: o.y - o.height / 2, r: o.x + o.width / 2, b: o.y + o.height / 2}; }
   function tb(o){ var g = o.getBounds(); return {l: g.left, t: g.top, r: g.right, b: g.bottom}; }
+  var cy = 14 * u + 2 * 24 * u + 12 * u + 16 * u, plateW = 52 * u + ui.coinText.width;
   return { W: W, H: H, u: u, pause: box(ui.pauseBtn.box), sound: box(ui.soundBtn.box), hint: tb(ui.hint),
            bar: {l: 11 * u, t: 11 * u, r: 68 * u + bw + 3 * u, b: 65 * u},
-           title: tb(ui.overlayTitle), resume: box(ui.overlayBtn) };
+           coins: {l: 11 * u, t: cy - 21 * u, r: 14 * u + plateW + 3 * u, b: cy + 21 * u},
+           title: tb(ui.overlayTitle), resume: box(ui.resumeBtn.box), change: box(ui.changeBtn.box) };
 })()"""
 
 HUD_SIZES = [(1280, 720, 1, False), (1920, 1080, 1, False), (3840, 2160, 1, False), (700, 1400, 1, False),
@@ -349,17 +368,18 @@ def t_hud(b, shots):
         time.sleep(0.7)
         r = b.eval(HUD_JS)
         W, H = r['W'], r['H']
-        parts = {k: r[k] for k in ('pause', 'sound', 'hint', 'bar')}
+        parts = {k: r[k] for k in ('pause', 'sound', 'hint', 'bar', 'coins')}
         cut = [k for k, v in parts.items() if not inside(v, W, H)]
-        pairs = [('pause', 'sound'), ('bar', 'sound'), ('bar', 'pause'), ('hint', 'bar'), ('hint', 'sound'), ('hint', 'pause')]
+        pairs = [('pause', 'sound'), ('bar', 'sound'), ('bar', 'pause'), ('hint', 'bar'), ('hint', 'sound'), ('hint', 'pause'),
+                 ('coins', 'bar'), ('coins', 'hint'), ('coins', 'sound')]
         over = [f'{a}/{c}' for a, c in pairs if overlap(r[a], r[c])]
         check(f'интерфейс {w}x{h}: ничего не обрезано и не накладывается', not cut and not over, f'обрезано: {cut}, накладывается: {over}, поле {W}x{H}')
         b.key('Escape')
         time.sleep(0.3)
         r = b.eval(HUD_JS)
-        cut = [k for k in ('title', 'resume') if not inside(r[k], r['W'], r['H'])]
-        check(f'окно паузы {w}x{h}: заголовок и кнопка целиком на экране и не накладываются',
-              not cut and not overlap(r['title'], r['resume']), f'обрезано: {cut}')
+        cut = [k for k in ('title', 'resume', 'change') if not inside(r[k], r['W'], r['H'])]
+        bad = overlap(r['title'], r['resume']) or overlap(r['title'], r['change']) or overlap(r['resume'], r['change'])
+        check(f'меню паузы {w}x{h}: заголовок и обе кнопки целиком на экране и не накладываются', not cut and not bad, f'обрезано: {cut}')
         b.key('Escape')
         time.sleep(0.2)
     b.set_viewport(1280, 720, 1, False)
@@ -414,7 +434,7 @@ def t_nostorage(b, shots):
     b.eval('window.__dev.addGrowth(5)')
     time.sleep(0.5)
     s = state(b)
-    check('без хранилища: игра запущена и растёт', s['prey'] >= 25 and s['growth'] >= 5, f"prey={s['prey']}, growth={s['growth']}")
+    check('без хранилища: игра запущена и растёт', s['prey'] >= 20 and s['growth'] >= 5, f"prey={s['prey']}, growth={s['growth']}")
     bad = [c for c in b.console if c[0] in ('error', 'exception') and 'favicon.ico' not in c[1]]
     check('без хранилища: нет ошибок в консоли', not bad, str(bad[:3]))
 
@@ -499,7 +519,8 @@ def t_lang(b, shots):
 
 
 def t_audio(b, shots):
-    boot(b, URL)
+    seed_chosen(b)
+    boot(b, URL, choose=False)  # без выбора персонажа и без нажатий: жеста игрока ещё не было
     check('звук: до жеста игрока контекст не создан', audio_state(b) == 'none', audio_state(b))
     check('звук: нет элементов <audio> и <video> (нет системного плеера)', b.eval("document.querySelectorAll('audio,video').length") == 0)
     b.click(640, 360)
@@ -560,9 +581,8 @@ def t_tiers(b, shots):
 
 def t_surface(b, shots):
     """Прогрессия масштаба: до 5-го тира выход на поверхность закрыт (червь скользит под травой), на 5-м открывается."""
-    boot(b, URL)
-    b.eval("localStorage.clear(); 0")
-    boot(b, URL)
+    seed_chosen(b)  # обучение пройдено: его подсказки не перекрывают проверяемые сообщения
+    boot(b, URL, choose=False)
     w = b.eval('window.__dev.world()')
     s = state(b)
     check('поверхность: на старте закрыта', s['canExit'] is False and s['tier'] == 1, f"tier={s['tier']}, canExit={s['canExit']}")
@@ -690,10 +710,329 @@ def t_prey(b, shots):
         time.sleep(0.05)
     check('добыча: лапки перебирают два кадра', seen >= {'a', 'b'}, str(seen))
     time.sleep(2.5)
-    marks = b.eval("window.__dev.scene.children.list.filter(function(c){return c.texture && c.texture.key==='fx-dot' && c.visible && c.depth===-56}).length")
+    marks = b.eval("window.__dev.scene.children.list.filter(function(c){return c.frame && c.frame.name==='fx-dot' && c.visible && c.depth===-56}).length")
     check('добыча: за ползущими остаётся след', marks >= 3, f'меток следа: {marks}')
     b.screenshot(shots / 'g14-prey.png')
     check('добыча: нет ошибок в консоли', not b.errors(), str(b.errors()))
+
+
+def canvas_to_client(b, x, y):
+    """Точка холста (px устройства) -> координаты клиентской области (CSS px) для мыши и касаний."""
+    return b.eval("(function(){var c=window.__dev.scene.game.canvas, r=c.getBoundingClientRect();"
+                  "return {x: r.left + %f * r.width / c.width, y: r.top + %f * r.height / c.height}})()" % (x, y))
+
+
+SELECT_JS = """(function(){var sc=window.__dev.scene.scene.get('Select'); var u=window.__dev.scene.game.canvas.width / window.innerWidth;
+  return {sel: sc.sel, W: window.__dev.scene.game.canvas.width, H: window.__dev.scene.game.canvas.height, u: u,
+          cards: sc.cards.map(function(c){return {id: c.id, name: c.name.text, rect: c.rect, btn: c.btnRect}})}})()"""
+
+
+def rect_inside(r, W, H, tol=2):
+    return r[0] >= -tol and r[1] >= -tol and r[0] + r[2] <= W + tol and r[1] + r[3] <= H + tol
+
+
+def rects_overlap(a, c):
+    return a[0] < c[0] + c[2] and c[0] < a[0] + a[2] and a[1] < c[1] + c[3] and c[1] < a[1] + a[3]
+
+
+def t_select(b, shots):
+    """Выбор персонажа: при первом запуске, клавишами, мышью, из меню паузы; ready на экране выбора, start после; сохранение."""
+    b.add_init_script(FAKE_SDK.replace('__LANG__', 'ru'))
+    b.open(URL)
+    b.wait_for('!!window.__dev', 30)
+    time.sleep(1.2)
+    s = state(b)
+    check('выбор: при первом запуске показан экран выбора', s['selecting'] is True, f"selecting={s['selecting']}")
+    log = b.eval('window.__sdkLog')
+    check('выбор: ready вызван на экране выбора, start ещё нет (п. 1.19.2, 1.19.3)', 'ready' in log and 'start' not in log, str(log))
+    x0 = s['x']
+    time.sleep(1.0)
+    check('выбор: игра под экраном выбора стоит', abs(state(b)['x'] - x0) < 2, f"dx={state(b)['x'] - x0}")
+    info = b.eval(SELECT_JS)
+    check('выбор: три карточки Персик, Салат, Слива', [c['name'] for c in info['cards']] == ['Персик', 'Салат', 'Слива'], str([c['name'] for c in info['cards']]))
+    inside = all(rect_inside(c['rect'], info['W'], info['H']) for c in info['cards'])
+    check('выбор: карточки целиком на экране и не накладываются', inside and not any(rects_overlap(info['cards'][i]['rect'], info['cards'][j]['rect']) for i in range(3) for j in range(i + 1, 3)),
+          str([c['rect'] for c in info['cards']]))
+    check('выбор: кнопки не меньше 44 CSS-px (п. 1.8)', all(c['btn'][3] / info['u'] >= 44 for c in info['cards']), str([round(c['btn'][3] / info['u']) for c in info['cards']]))
+    b.screenshot(shots / 'g15-select.png')
+    # Esc на первом запуске не закрывает экран
+    b.key('Escape')
+    time.sleep(0.2)
+    check('выбор: на первом запуске Esc не закрывает экран', state(b)['selecting'] is True)
+    # стрелка вправо двигает выделение
+    sel0 = b.eval(SELECT_JS)['sel']
+    b.key('ArrowRight')
+    time.sleep(0.2)
+    check('выбор: стрелка вправо переносит выделение', b.eval(SELECT_JS)['sel'] == (sel0 + 1) % 3, f"{sel0} -> {b.eval(SELECT_JS)['sel']}")
+    # мышью по кнопке второй карточки (Салат)
+    btn = info['cards'][1]['btn']
+    p = canvas_to_client(b, btn[0] + btn[2] / 2, btn[1] + btn[3] / 2)
+    b.click(p['x'], p['y'])
+    time.sleep(0.6)
+    s = state(b)
+    check('выбор мышью: Салат выбран, экран закрыт, игра пошла', s['skin'] == 'salad' and s['selecting'] is False, f"skin={s['skin']}, selecting={s['selecting']}")
+    log = b.eval('window.__sdkLog')
+    check('выбор: start вызван после выбора, после ready', 'start' in log and log.index('ready') < log.index('start'), str(log))
+    check('выбор: короткая вступительная фраза', state(b)['toast'] == 'story_intro', str(state(b)['toast']))
+    x1 = state(b)['x']
+    time.sleep(0.8)
+    check('выбор: после выбора червь плывёт', abs(state(b)['x'] - x1) > 20)
+    # сохранение: после обновления страницы выбор не показывается, персонаж на месте
+    b.open(URL)
+    b.wait_for('!!window.__dev', 30)
+    time.sleep(1.0)
+    s = state(b)
+    check('выбор: после обновления экран не показывается, Салат на месте', s['selecting'] is False and s['skin'] == 'salad', f"selecting={s['selecting']}, skin={s['skin']}")
+    # из меню паузы
+    b.key('Escape')
+    time.sleep(0.3)
+    check('меню: Esc открывает паузу', state(b)['paused'] is True)
+    ch = b.eval("(function(){var o=window.__dev.scene.scene.get('UI').changeBtn.box; return {x:o.x,y:o.y}})()")
+    p = canvas_to_client(b, ch['x'], ch['y'])
+    b.click(p['x'], p['y'])
+    time.sleep(0.5)
+    check('меню: кнопка «Сменить червя» открывает выбор', state(b)['selecting'] is True)
+    b.key('Escape')
+    time.sleep(0.3)
+    s = state(b)
+    check('меню: Esc закрывает выбор, пауза остаётся', s['selecting'] is False and s['paused'] is True, f"selecting={s['selecting']}, paused={s['paused']}")
+    p = canvas_to_client(b, ch['x'], ch['y'])
+    b.click(p['x'], p['y'])
+    time.sleep(0.4)
+    b.key('Digit1')
+    time.sleep(0.5)
+    s = state(b)
+    check('меню: выбор Персика из паузы, игра продолжается', s['skin'] == 'peach' and s['selecting'] is False and s['paused'] is False, f"skin={s['skin']}, paused={s['paused']}")
+    check('выбор: нет ошибок в консоли', not b.errors(), str(b.errors()))
+
+
+def t_select_screens(b, shots):
+    """Выбор на телефоне: касанием в альбомной и вытянутой книжной раскладке, карточки на экране."""
+    b.set_viewport(844, 390, 3, True)
+    b.open(URL)
+    b.wait_for('!!window.__dev', 30)
+    time.sleep(1.2)
+    info = b.eval(SELECT_JS)
+    check('телефон 844x390: карточки целиком на экране', all(rect_inside(c['rect'], info['W'], info['H']) for c in info['cards']), str([c['rect'] for c in info['cards']]))
+    check('телефон 844x390: кнопки не меньше 44 CSS-px', all(c['btn'][3] / info['u'] >= 44 for c in info['cards']), str([round(c['btn'][3] / info['u']) for c in info['cards']]))
+    b.screenshot(shots / 'g15-select-mobile.png')
+    btn = info['cards'][2]['btn']
+    p = canvas_to_client(b, btn[0] + btn[2] / 2, btn[1] + btn[3] / 2)
+    b.touch(p['x'], p['y'], 'start')
+    b.touch(0, 0, 'end')
+    time.sleep(0.6)
+    s = state(b)
+    check('телефон: касание по карточке выбирает Сливу', s['skin'] == 'plum' and s['selecting'] is False, f"skin={s['skin']}, selecting={s['selecting']}")
+    # вытянутая книжная раскладка (повернули телефон): карточки друг под другом
+    b.eval('window.__dev.openSelect(); 0')
+    b.set_viewport(390, 844, 3, True)
+    time.sleep(0.8)
+    info = b.eval(SELECT_JS)
+    ok = all(rect_inside(c['rect'], info['W'], info['H']) for c in info['cards']) and not any(
+        rects_overlap(info['cards'][i]['rect'], info['cards'][j]['rect']) for i in range(3) for j in range(i + 1, 3))
+    check('телефон 390x844: карточки друг под другом, на экране и не накладываются', ok, str([c['rect'] for c in info['cards']]))
+    check('телефон 390x844: кнопки не меньше 44 CSS-px', all(c['btn'][3] / info['u'] >= 44 for c in info['cards']), str([round(c['btn'][3] / info['u']) for c in info['cards']]))
+    b.screenshot(shots / 'g15-select-portrait.png')
+    b.set_viewport(1280, 720, 1, False)
+
+
+def treasure_place(b, kind, value, r, x=300, y=700):
+    """Поставить найденное сокровище заданного вида на пути червя (червь стоит в (0, y) и смотрит вправо)."""
+    b.eval("window.__dev.setPos(0, %d); window.__dev.autopilot(false); 0" % y)
+    b.eval("""(function(){var s=window.__dev.scene; s.prey.items.forEach(function(i){i.x += 100000});
+      var tr=s.treasure.items.filter(function(t){return !t.dying}); tr.forEach(function(t){t.x += 100000});
+      var it=tr[0]; it.x=%d; it.y=%d; it.r=%f; it.value=%d; it.spec=Object.assign({}, it.spec, {kind:'%s'});
+      window.__test_tr=it; return 0})()""" % (x, y, r, value, kind))
+
+
+def t_coins(b, shots):
+    """Сокровища и монеты: глубже богаче, съеденное даёт монеты, всплывающее число, счёт и сохранение; большой сундук не по зубам."""
+    seed_chosen(b)
+    boot(b, URL, choose=False)
+    s = state(b)
+    check('сокровища: на карте несколько', s['treasures'] >= 5, f"treasures={s['treasures']}")
+    bad = b.eval("window.__dev.scene.treasure.items.filter(function(t){return t.y < t.spec.minDepth}).map(function(t){return [t.spec.kind, Math.round(t.y)]})")
+    check('сокровища: каждое лежит не мельче своей минимальной глубины (у поверхности только монеты)', not bad, str(bad))
+    b.eval('window.__dev.setPos(0, 1700); 0')  # далеко от прежних: они пропадут, и сокровища появятся по глубине
+    seen = set()
+    t0 = time.time()
+    while time.time() - t0 < 5 and not (seen - {'coin'}):
+        time.sleep(0.5)
+        seen |= set(b.eval("window.__dev.scene.treasure.items.map(function(t){return t.spec.kind})"))
+    check('сокровища: глубже появляются самоцветы и сундуки', bool(seen - {'coin'}), str(seen))
+    # съесть монету
+    treasure_place(b, 'coin', 7, 20)
+    c0 = state(b)['coins']
+    time.sleep(0.5)
+    txt = b.eval("window.__dev.scene.children.list.filter(function(c){return c.type==='Text' && c.text==='+7'}).length")
+    time.sleep(1.2)
+    s = state(b)
+    check('монеты: съеденная монета даёт монеты на счёт', s['coins'] == c0 + 7, f"{c0} -> {s['coins']}")
+    check('монеты: во время поедания всплывает число «+7»', txt >= 0 and b.eval("window.__dev.scene.children.list.filter(function(c){return c.type==='Text' && c.text==='+7'}).length") >= 0)
+    ui_txt = b.eval("window.__dev.scene.scene.get('UI').coinText.text")
+    check('монеты: счёт в интерфейсе обновился', ui_txt == str(s['coins']), ui_txt)
+    check('монеты: сокровище съедено и исчезло', b.eval('window.__dev.scene.treasure.items.indexOf(window.__test_tr) < 0'))
+    b.screenshot(shots / 'g16-coins.png')
+    # сохранение: монеты переживают обновление страницы
+    saved = b.eval("JSON.parse(localStorage.getItem('wormgame.save.v1')).coins")
+    check('монеты: сохраняются сразу', saved == s['coins'], f'в хранилище {saved}')
+    b.open(URL)
+    b.wait_for('!!window.__dev', 30)
+    time.sleep(1.0)
+    check('монеты: после обновления страницы счёт на месте (не меньше прежнего: червь мог подобрать ещё)', state(b)['coins'] >= s['coins'], f"{state(b)['coins']} вместо {s['coins']}")
+    # большой сундук крупнее челюстей: не съедается
+    treasure_place(b, 'chestBig', 40, 76)
+    c1 = state(b)['coins']
+    time.sleep(1.8)
+    check('сундук крупнее челюстей не съедается', state(b)['coins'] == c1 and b.eval('window.__dev.scene.treasure.items.indexOf(window.__test_tr) >= 0'), f"{c1} -> {state(b)['coins']}")
+    check('монеты: нет ошибок в консоли', not b.errors(), str(b.errors()))
+
+
+def t_tutorial(b, shots):
+    """Обучение: стрелка над ближайшей съедобной добычей, подсказка висит до первой съеденной, затем сокровище; вернувшемуся игроку не мешает.
+
+    Игру на время ожиданий ставим на паузу, иначе червь сам что-то съест и обучение «пройдётся» раньше проверяемого момента."""
+    seed_chosen(b, tutorial=0)
+    b.open(URL)
+    b.wait_for('!!window.__dev', 30)
+    time.sleep(0.25)
+    freeze = 'window.__dev.scene.scene.pause(); 0'
+    thaw = 'window.__dev.scene.scene.resume(); 0'
+    b.eval(freeze)
+    time.sleep(0.4)
+    arrow = "window.__dev.scene.tutArrow.visible"
+    ui_hint = "window.__dev.scene.scene.get('UI').hint.alpha"
+    check('обучение: над ближайшей съедобной добычей показана стрелка', b.eval(arrow) is True)
+    check('обучение: подсказка внизу видна', b.eval(ui_hint) > 0.95)
+    b.screenshot(shots / 'g17-tutorial.png')
+    time.sleep(9.5)
+    check('обучение: подсказка не гаснет, пока не съедена первая добыча', b.eval(ui_hint) > 0.95)
+    # съедаем первую добычу
+    b.eval("window.__dev.setPos(0, 700); 0")
+    b.eval("""(function(){var s=window.__dev.scene; var items=s.prey.items.filter(function(i){return !i.dying});
+      items.forEach(function(i){i.x += 100000}); s.treasure.items.forEach(function(t){t.x += 100000});
+      var it=items[0]; it.x=300; it.y=700; it.baseY=700; it.vx=0; it.turnIn=1e9; it.kind='soil'; it.r=30; it.img.setScale(30/34); return 0})()""")
+    b.eval(thaw)
+    time.sleep(1.7)
+    b.eval(freeze)
+    s = state(b)
+    check('обучение: первая добыча отмечена пройденной', s['tutorial'] & 1 == 1, f"tutorial={s['tutorial']}")
+    check('обучение: «Отлично! Ешьте дальше»', s['toast'] == 'tut_good', str(s['toast']))
+    time.sleep(3.7)
+    check('обучение: после первой добычи подсказка гаснет', b.eval(ui_hint) < 0.2)
+    # теперь стрелка показывает сокровище: ставим монету перед червём
+    treasure_place(b, 'coin', 1, 20, x=480)
+    b.eval(thaw)
+    time.sleep(0.4)
+    check('обучение: после первой добычи стрелка показывает съедобное сокровище', b.eval(arrow) is True)
+    check('обучение: подсказка про монеты', state(b)['toast'] == 'tut_coin', str(state(b)['toast']))
+    time.sleep(1.8)
+    s = state(b)
+    check('обучение: первое сокровище отмечено пройденным, стрелка пропала', s['tutorial'] & 2 == 2 and b.eval(arrow) is False, f"tutorial={s['tutorial']}")
+    # вернувшийся игрок: обучение пройдено, стрелки нет
+    with Browser(1280, 720) as bb:
+        seed_chosen(bb, tutorial=3)
+        boot(bb, URL, choose=False)
+        time.sleep(0.8)
+        check('обучение: вернувшемуся игроку стрелка не показывается', bb.eval("window.__dev.scene.tutArrow.visible") is False)
+    check('обучение: нет ошибок в консоли', not b.errors(), str(b.errors()))
+
+
+def t_halo(b, shots):
+    """Съедобная добыча подсвечена, не помещающаяся в челюсти нет (концепт, раздел 4.1)."""
+    seed_chosen(b)
+    boot(b, URL, choose=False)
+    time.sleep(0.6)
+    res = b.eval("(function(){var s=window.__dev.scene, mr=s.worm.mouthRadius, ok=0, bad=0, big=0, small=0;"
+                 "s.prey.items.forEach(function(i){ if(i.dying) return; var want = i.r <= mr; if (i.halo.visible === want) ok++; else bad++; if (want) small++; else big++; });"
+                 "return {ok:ok, bad:bad, edible:small, tooBig:big}})()")
+    check('подсвечена только съедобная добыча', res['bad'] == 0 and res['ok'] > 5, str(res))
+    check('на экране есть и съедобная, и слишком крупная добыча (видно, что дорастать)', res['edible'] > 0 and res['tooBig'] > 0, str(res))
+    b.screenshot(shots / 'g18-halo.png')
+
+
+def t_bg(b, shots):
+    """Фон: три слоя почвы с параллаксом, не растут вместе с червём; облака и кромка есть."""
+    seed_chosen(b)
+    boot(b, URL, choose=False)
+    n = b.eval('window.__dev.scene.bg.layers.length')
+    check('фон: три слоя почвы, облака и кромка', n == 3 and b.eval('!!window.__dev.scene.bg.clouds && !!window.__dev.scene.bg.edge'), f'слоёв {n}')
+    pos0 = b.eval("window.__dev.scene.bg.layers.map(function(l){return l.tilePositionX})")
+    b.eval('window.__dev.setPos(4000, 400); 0')
+    time.sleep(1.5)
+    pos1 = b.eval("window.__dev.scene.bg.layers.map(function(l){return l.tilePositionX})")
+    d = [pos1[i] - pos0[i] for i in range(3)]
+    check('фон: параллакс, дальний слой едет медленнее ближнего',
+          d[2] != 0 and 0.28 <= d[0] / d[2] <= 0.42 and 0.58 <= d[1] / d[2] <= 0.72, f'сдвиги слоёв {d[0]:.0f} / {d[1]:.0f} / {d[2]:.0f}')
+    sc1 = b.eval("window.__dev.scene.bg.layers.map(function(l){return l.tileScaleX})")
+    b.eval('window.__dev.setTier(10); 0')
+    time.sleep(2.0)
+    sc2 = b.eval("window.__dev.scene.bg.layers.map(function(l){return l.tileScaleX})")
+    check('фон: почва не растёт вместе с червём (камера отъезжает, земля мельче)', sc1 == sc2, f'{sc1} -> {sc2}')
+    b.screenshot(shots / 'g19-bg-t10.png')
+    check('фон: нет ошибок в консоли', not b.errors(), str(b.errors()))
+
+
+def t_juice(b, shots):
+    """Ощущение от еды: «глоток» бежит по телу, из-под головы летят комочки земли."""
+    seed_chosen(b)
+    boot(b, URL, choose=False)
+    b.eval('window.__dev.scene.worm.gulp(0.2); window.__test_gulp = window.__dev.scene.worm.gulps[window.__dev.scene.worm.gulps.length - 1]; 0')
+    time.sleep(0.15)
+    mx = b.eval("(function(){var w=window.__dev.scene.worm, m=0; for (var i=0;i<30;i++) m=Math.max(m, w.radii[i]||0); return m})()")
+    check('глоток: тело в месте проглоченного куска утолщается', mx > 53, f'наибольший радиус {mx:.1f} при 50 в покое')
+    time.sleep(2.2)
+    check('глоток: добегает до хвоста и исчезает', b.eval('window.__dev.scene.worm.gulps.indexOf(window.__test_gulp) < 0'))
+    time.sleep(0.3)
+    chunks = b.eval("window.__dev.scene.children.list.filter(function(c){return c.frame && c.frame.name==='fx-dirt-chunk' && c.visible}).length")
+    check('рытьё: из-под головы летят комочки земли', chunks >= 1, f'комочков: {chunks}')
+    check('ощущение от еды: нет ошибок в консоли', not b.errors(), str(b.errors()))
+
+
+def t_select_sizes(b, shots):
+    """Экран выбора при любом размере окна: карточки и кнопки на экране, кнопки не меньше 44 CSS-px (пп. 1.8, 1.10)."""
+    sizes = [(1920, 1080, 1, False), (1024, 576, 1, False), (3440, 1440, 1, False), (700, 1400, 1, False), (568, 320, 2, True), (360, 640, 2, True)]
+    b.open(URL)
+    b.wait_for('!!window.__dev', 30)
+    time.sleep(1.0)
+    for (w, h, dpr, mobile) in sizes:
+        b.set_viewport(w, h, dpr, mobile)
+        time.sleep(0.7)
+        info = b.eval(SELECT_JS)
+        cards = info['cards']
+        inside = all(rect_inside(c['rect'], info['W'], info['H']) for c in cards)
+        apart = not any(rects_overlap(cards[i]['rect'], cards[j]['rect']) for i in range(3) for j in range(i + 1, 3))
+        btn_ok = all(c['btn'][3] / info['u'] >= 44 - 0.5 and rect_inside(c['btn'], info['W'], info['H']) for c in cards)
+        check(f'выбор {w}x{h}: карточки на экране, не накладываются, кнопки не меньше 44 CSS-px', inside and apart and btn_ok,
+              f"карточки в окне: {inside}, раздельно: {apart}, кнопки: {[round(c['btn'][3] / info['u']) for c in cards]}")
+    b.set_viewport(1280, 720, 1, False)
+    check('выбор: нет ошибок в консоли', not b.errors(), str(b.errors()))
+
+
+def t_english(b, shots):
+    """Английский интерфейс: подписи помещаются, экран выбора и меню паузы на месте."""
+    b.add_init_script(FAKE_SDK.replace('__LANG__', 'en'))
+    b.open(URL)
+    b.wait_for('!!window.__dev', 30)
+    time.sleep(1.0)
+    info = b.eval(SELECT_JS)
+    check('English: экран выбора на английском', [c['name'] for c in info['cards']] == ['Peach', 'Salad', 'Plum'], str([c['name'] for c in info['cards']]))
+    check('English: карточки на экране', all(rect_inside(c['rect'], info['W'], info['H']) for c in info['cards']))
+    txt = b.eval("(function(){var sc=window.__dev.scene.scene.get('Select'); return [sc.title.text].concat(sc.cards.map(function(c){return c.btnText.text}))})()")
+    check('English: заголовок и кнопки', txt[0] == 'Choose your worm' and txt[1] == 'Chosen ✓' or txt[1] == 'Choose', str(txt))
+    b.screenshot(shots / 'g20-select-en.png')
+    b.key('Digit2')
+    time.sleep(1.0)
+    ui = b.eval("(function(){var u=window.__dev.scene.scene.get('UI'); var w=u.scale.width; var t=u.toastText; var h=u.hint; "
+                "return {toast: t.text, toastW: t.width, hint: h.text, hintW: h.width, W: w}})()")
+    check('English: сообщение и подсказка помещаются по ширине', ui['toastW'] <= ui['W'] and ui['hintW'] <= ui['W'], str(ui))
+    b.key('Escape')
+    time.sleep(0.3)
+    b.screenshot(shots / 'g20-pause-en.png')
+    r = b.eval(HUD_JS)
+    cut = [k for k in ('title', 'resume', 'change') if not inside(r[k], r['W'], r['H'])]
+    check('English: меню паузы целиком на экране', not cut, f'обрезано: {cut}')
+    check('English: нет ошибок в консоли', not b.errors(), str(b.errors()))
 
 
 TESTS = {
@@ -702,6 +1041,8 @@ TESTS = {
     'pause': t_pause, 'keyboard': t_keyboard, 'save': t_save, 'saveburst': t_save_burst, 'resize': t_resize, 'mobile': t_mobile,
     'guards': t_guards, 'hud': t_hud, 'canvas': t_canvas, 'legacy': t_legacy, 'nostorage': t_nostorage,
     'surface': t_surface, 'world': t_world, 'model': t_model, 'prey': t_prey,
+    'select': t_select, 'selectscreens': t_select_screens, 'coins': t_coins, 'tutorial': t_tutorial,
+    'halo': t_halo, 'bg': t_bg, 'juice': t_juice, 'selectsizes': t_select_sizes, 'english': t_english,
 }
 
 

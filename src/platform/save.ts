@@ -9,18 +9,26 @@ import { platform } from './platform';
  * поэтому облачные записи склеиваем и отправляем не чаще раза в 4 секунды.
  */
 export interface SaveData {
-  v: 1;
+  v: 2;
   savedAt: number;
   skin: SkinId;
+  /** Игрок уже выбирал персонажа (экран выбора показываем один раз, потом он в меню). */
+  skinChosen: boolean;
   tier: number;
   growth: number;
   coins: number;
   up: Upgrades;
   sound: boolean;
+  /** Что из обучения пройдено (битовая маска, TUTORIAL_*): подсказки показываем один раз. */
+  tutorial: number;
 }
 
+/** Биты обучения. */
+export const TUTORIAL_EAT = 1; // первая добыча съедена
+export const TUTORIAL_COIN = 2; // первое сокровище съедено
+
 export function defaultSave(): SaveData {
-  return { v: 1, savedAt: 0, skin: DEFAULT_SKIN, tier: 1, growth: 0, coins: 0, up: { jump: 0, hp: 0, speed: 0 }, sound: true };
+  return { v: 2, savedAt: 0, skin: DEFAULT_SKIN, skinChosen: false, tier: 1, growth: 0, coins: 0, up: { jump: 0, hp: 0, speed: 0 }, sound: true, tutorial: 0 };
 }
 
 function num(v: unknown, def: number, min: number, max: number): number {
@@ -34,14 +42,16 @@ function sanitize(raw: unknown): SaveData | null {
   const up = (r.up ?? {}) as Record<string, unknown>;
   const d = defaultSave();
   return {
-    v: 1,
+    v: 2,
     savedAt: num(r.savedAt, 0, 0, Number.MAX_SAFE_INTEGER),
     skin: isSkin(r.skin) ? r.skin : d.skin,
+    skinChosen: r.skinChosen === true,
     tier: Math.round(num(r.tier, 1, 1, MAX_TIER)),
     growth: num(r.growth, 0, 0, 1e9),
     coins: Math.round(num(r.coins, 0, 0, 1e12)),
     up: { jump: clampLevel(up.jump), hp: clampLevel(up.hp), speed: clampLevel(up.speed) },
     sound: r.sound !== false,
+    tutorial: Math.round(num(r.tutorial, 0, 0, 255)),
   };
 }
 

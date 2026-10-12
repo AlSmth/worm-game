@@ -1,0 +1,4 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+<defs><radialGradient id="pop-g" cx="0.45" cy="0.3" r="0.85"><stop offset="0" stop-color="#FFFFFF"/><stop offset="0.45" stop-color="#FFF27A"/><stop offset="1" stop-color="#FFB020"/></radialGradient></defs>
+<path d="M 66.9 6.1 L 72.5 32.1 L 93.0 13.8 L 87.3 40.7 L 115.6 37.5 L 95.9 55.5 L 122.0 64.0 L 95.9 72.5 L 112.7 95.5 L 87.3 87.3 L 93.0 114.2 L 72.5 95.9 L 61.1 121.9 L 55.5 95.9 L 35.0 114.2 L 40.7 87.3 L 12.4 90.5 L 32.1 72.5 L 6.0 64.0 L 32.1 55.5 L 15.3 32.5 L 40.7 40.7 L 35.0 13.8 L 55.5 32.1 Z" fill="url(#pop-g)" stroke="#2B1B17" stroke-width="4.5" stroke-linejoin="round"/><circle cx="64" cy="64" r="15" fill="#FFFFFF" fill-opacity=".85"/>
+</svg>

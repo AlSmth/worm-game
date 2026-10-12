@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { Worm, type Steer } from '../game/Worm';
 import { PreySystem, type PreyItem, type View } from '../game/Prey';
+import { TreasureSystem, type TreasureItem } from '../game/Treasure';
 import { WorldBackground } from '../game/Background';
 import { Fx } from '../game/Fx';
 import { controls } from '../core/controls';
@@ -8,7 +9,7 @@ import { sfx } from '../core/audio';
 import { hideLoader } from '../core/loader';
 import { state, hitsUi, showToast } from '../core/state';
 import { platform } from '../platform/platform';
-import { save } from '../platform/save';
+import { save, TUTORIAL_COIN, TUTORIAL_EAT } from '../platform/save';
 import { MAX_TIER, growthFor, growthNeeded, segmentsAt, wormScale } from '../data/growth';
 import { clampLevel, type Upgrades } from '../data/upgrades';
 import { SURFACE_TIER, WORLD_WIDTH } from '../data/world';
@@ -19,12 +20,14 @@ import { mountDevPanel, type DevApi } from '../dev/devPanel';
 const BASE_VIEW_H = 900;
 const BASE_VIEW_W = 1100;
 const NO_STEER: Steer = { mode: 'none', tx: 0, ty: 0, dx: 0, dy: 0 };
-const DIRT = [0x6b4a32, 0x8a5a3a, 0x4a2f1f];
+const DIRT = [0x6b4a32, 0x8a5a3a, 0x4a2f1f, 0xa07048];
 const STARS = [0xffd23f, 0xffffff, 0xff9a2e];
+const GOLD = [0xffd23f, 0xffffff, 0xffe27a];
 
 export class GameScene extends Phaser.Scene {
   worm!: Worm;
   prey!: PreySystem;
+  treasure!: TreasureSystem;
   private bg!: WorldBackground;
   private fx!: Fx;
   private pointerActive = false;
@@ -35,6 +38,11 @@ export class GameScene extends Phaser.Scene {
   /** Кратковременный отъезд камеры при открытии поверхности (доля, плавно спадает). */
   private camKick = 0;
   private lastBump = -1e9;
+  /** Первый запуск: сначала экран выбора персонажа, потом игра. */
+  private firstRun = false;
+  private digT = 0;
+  private tutArrow!: Phaser.GameObjects.Image;
+  private coinHinted = false;
 
   constructor() {
     super('Game');
@@ -49,7 +57,9 @@ export class GameScene extends Phaser.Scene {
     state.tier = d.tier;
     state.growth = d.growth;
     state.need = growthNeeded(d.tier);
+    state.coins = d.coins;
     state.paused = false;
+    state.selecting = false;
 
     const tf = this.fractionalTier();
     const S0 = wormScale(tf);
@@ -64,18 +74,43 @@ export class GameScene extends Phaser.Scene {
     this.worm.canExit = state.tier >= SURFACE_TIER;
 
     this.prey = new PreySystem(this);
+    this.treasure = new TreasureSystem(this, (x, y) => this.glint(x, y));
+    this.tutArrow = this.add.image(0, 0, 'fx', 'fx-arrow').setDepth(600).setVisible(false);
     this.updateCamera(0, true);
-    this.prey.populate(0, this.worm.y, S0, this.view(), this.worm.canExit);
+    this.prey.populate(0, this.worm.y, S0, this.view(), this.worm.canExit, state.tier);
+    this.treasure.populate(0, this.worm.y, S0, this.view());
 
     this.setupInput();
     platform.onPause((p) => this.onPlatformPause(p));
+    this.game.events.on('skin-chosen', (id: SkinId) => this.onSkinChosen(id));
+    this.game.events.on('open-select', () => this.openSelect(false));
 
     this.scene.launch('UI');
-    // Игрок может начинать: сообщаем платформе (пп. 1.19.2, 1.19.3)
-    platform.gameplay(true);
+    // Игрок может начинать: сообщаем платформе (пп. 1.19.2, 1.19.3). При первом запуске это экран выбора персонажа.
+    this.firstRun = !d.skinChosen;
+    if (this.firstRun) this.openSelect(true);
+    else platform.gameplay(true);
     platform.ready();
     hideLoader();
     if (import.meta.env.DEV) this.installDev();
+  }
+
+  // ---------- выбор персонажа ----------
+  private openSelect(first: boolean): void {
+    if (state.selecting) return;
+    state.selecting = true;
+    platform.gameplay(false);
+    this.scene.launch('Select', { first });
+    this.scene.bringToTop('Select');
+  }
+
+  private onSkinChosen(id: SkinId): void {
+    this.worm.setSkin(id);
+    if (this.firstRun) {
+      this.firstRun = false;
+      platform.gameplay(true);
+      showToast('story_intro', 5);
+    }
   }
 
   // ---------- ввод ----------
@@ -83,7 +118,7 @@ export class GameScene extends Phaser.Scene {
     this.input.addPointer(2);
     const onPointer = (p: Phaser.Input.Pointer, down: boolean) => {
       if (down) sfx.unlock();
-      if (hitsUi(p.x, p.y)) return;
+      if (state.selecting || hitsUi(p.x, p.y)) return;
       if (p.wasTouch && !p.isDown) return;
       this.pointerActive = true;
       this.pointer.x = p.x;
@@ -130,13 +165,17 @@ export class GameScene extends Phaser.Scene {
 
   // ---------- шаг ----------
   override update(time: number, delta: number): void {
-    if (state.paused) return;
+    if (state.paused || state.selecting) return;
     const dt = Math.min(delta / 1000, 0.05);
     const w = this.worm;
     w.canExit = state.tier >= SURFACE_TIER;
     w.update(dt, this.readSteer(), time);
-    this.prey.update(dt, time / 1000, w.x, w.y, w.scale, this.view(), w.canExit);
+    const view = this.view();
+    this.prey.update(dt, time / 1000, w.x, w.y, w.scale, view, w.canExit, state.tier, w.mouthRadius);
+    this.treasure.update(dt, time / 1000, w.x, w.y, w.scale, view, w.mouthRadius);
     this.checkEating(time);
+    this.dig(dt);
+    this.updateTutorial(time);
     this.updateCamera(dt, false);
     this.bg.update(this.cameras.main, w.scale);
     this.fx.update(dt);
@@ -185,18 +224,26 @@ export class GameScene extends Phaser.Scene {
     const hx = Math.cos(w.heading);
     const hy = Math.sin(w.heading);
     let near = false;
+    const consider = (x: number, y: number, r: number): 'eat' | 'near' | null => {
+      const dx = x - m.x;
+      const dy = y - m.y;
+      const d2 = dx * dx + dy * dy;
+      const reach = mr + r * 0.5;
+      if (d2 < reach * reach) return 'eat';
+      const look = mr * 3 + r;
+      return d2 < look * look && dx * hx + dy * hy > 0 ? 'near' : null;
+    };
     for (const it of this.prey.items) {
       if (it.dying || !this.prey.isEdible(it, mr)) continue;
-      const dx = it.x - m.x;
-      const dy = it.y - m.y;
-      const d2 = dx * dx + dy * dy;
-      const reach = mr + it.r * 0.5;
-      if (d2 < reach * reach) {
-        this.eat(it, m, now);
-        continue;
-      }
-      const look = mr * 3 + it.r;
-      if (d2 < look * look && dx * hx + dy * hy > 0) near = true;
+      const c = consider(it.x, it.y, it.r);
+      if (c === 'eat') this.eat(it, m, now);
+      else if (c === 'near') near = true;
+    }
+    for (const tr of this.treasure.items) {
+      if (tr.dying || !this.treasure.isEdible(tr, mr)) continue;
+      const c = consider(tr.x, tr.y, tr.r);
+      if (c === 'eat') this.eatTreasure(tr, m, now);
+      else if (c === 'near') near = true;
     }
     w.setHint(near ? 'open' : 'idle');
   }
@@ -205,10 +252,54 @@ export class GameScene extends Phaser.Scene {
     const w = this.worm;
     sfx.play('eat');
     w.flash('chomp', 150, now);
-    this.fx.burst(m.x, m.y, w.scale, { count: 8, tex: 'fx-star', colors: STARS, speed: 380, life: 0.5, gravity: 900, size: 22 });
+    w.gulp(0.09 + Math.min(0.12, it.r / (w.mouthRadius * 9)));
+    this.fx.pop(m.x, m.y, 1, Math.max(110, it.r * 2.4));
+    this.fx.burst(m.x, m.y, w.scale, { count: 7, frame: 'fx-star', colors: STARS, speed: 380, life: 0.5, gravity: 900, size: 22 });
     this.prey.consume(it, m.x, m.y);
     this.eaten++;
     this.addGrowth(growthFor(it.r, w.scale));
+    if (!(save.data.tutorial & TUTORIAL_EAT)) {
+      save.patch({ tutorial: save.data.tutorial | TUTORIAL_EAT });
+      showToast('tut_good', 3.5);
+    }
+  }
+
+  /** Сокровище съедено: монеты на счёт, искры, всплывающее число. */
+  private eatTreasure(tr: TreasureItem, m: { x: number; y: number }, now: number): void {
+    const w = this.worm;
+    sfx.play(tr.spec.kind === 'coin' ? 'coin' : tr.spec.kind === 'gem' ? 'gem' : 'chest');
+    w.flash('happy', 380, now);
+    w.gulp(0.08);
+    this.fx.pop(m.x, m.y, 1, Math.max(100, tr.r * 2.6), 0xffe27a);
+    this.fx.burst(m.x, m.y, w.scale, {
+      count: tr.spec.kind === 'coin' ? 6 : 14,
+      frame: 'fx-coin-sparkle',
+      colors: GOLD,
+      speed: 460,
+      life: 0.7,
+      gravity: 500,
+      size: 34,
+    });
+    this.fx.floatText(m.x, m.y - 40 * w.scale, w.scale, `+${tr.value}`);
+    this.treasure.consume(tr, m.x, m.y);
+    state.coins += tr.value;
+    save.patch({ coins: state.coins });
+    if (!(save.data.tutorial & TUTORIAL_COIN)) save.patch({ tutorial: save.data.tutorial | TUTORIAL_COIN });
+  }
+
+  /** Блеск на сокровище: крохотная искра, чтобы оно привлекало взгляд. */
+  private glint(x: number, y: number): void {
+    this.fx.burst(x, y, 1, { count: 1, frame: 'fx-coin-sparkle', colors: [0xffffff, 0xffe27a], speed: 6, life: 0.55, gravity: 0, size: 30 });
+  }
+
+  /** Комочки земли из-под головы, пока червь роет: ощущение подземного движения. */
+  private dig(dt: number): void {
+    const w = this.worm;
+    this.digT -= dt;
+    if (this.digT > 0 || w.inAir || w.y < 50 * w.scale || w.speed < 0.3 * w.swimSpeed) return;
+    this.digT = 0.07 + Math.random() * 0.06;
+    const m = w.mouth();
+    this.fx.burst(m.x, m.y, w.scale, { count: 1, frame: 'fx-dirt-chunk', colors: DIRT, speed: 200, life: 0.55, gravity: 1000, size: 16 });
   }
 
   private fractionalTier(): number {
@@ -243,6 +334,7 @@ export class GameScene extends Phaser.Scene {
     const now = this.time.now;
     if (now - this.lastBump < 6000) return;
     this.lastBump = now;
+    sfx.play('bump');
     showToast('hint_locked', 3.5);
   }
 
@@ -251,7 +343,7 @@ export class GameScene extends Phaser.Scene {
     sfx.play('grow');
     w.flash('happy', 900, this.time.now);
     this.fx.ring(w.x, w.y, w.scale);
-    this.fx.burst(w.x, w.y, w.scale, { count: 18, tex: 'fx-star', colors: STARS, speed: 520, life: 0.8, gravity: 700, size: 26 });
+    this.fx.burst(w.x, w.y, w.scale, { count: 18, frame: 'fx-star', colors: STARS, speed: 520, life: 0.8, gravity: 700, size: 26 });
   }
 
   /** Выход на поверхность открылся: сигнал, подсказка и заметный отъезд камеры. */
@@ -261,20 +353,61 @@ export class GameScene extends Phaser.Scene {
     this.camKick = 0.16;
     this.time.delayedCall(260, () => sfx.play('grow'));
     this.fx.ring(w.x, w.y, w.scale * 1.4, 0x7bd957);
-    this.fx.burst(w.x, w.y, w.scale, { count: 26, tex: 'fx-star', colors: STARS, speed: 640, life: 1.0, gravity: 600, size: 30 });
+    this.fx.burst(w.x, w.y, w.scale, { count: 26, frame: 'fx-star', colors: STARS, speed: 640, life: 1.0, gravity: 600, size: 30 });
+  }
+
+  // ---------- обучение ----------
+  /** Стрелка над целью: сначала ближайшая съедобная добыча, после первой съеденной ближайшее съедобное сокровище. */
+  private updateTutorial(now: number): void {
+    const t = save.data.tutorial;
+    const w = this.worm;
+    const view = this.view();
+    let target: { x: number; y: number; r: number } | null = null;
+    let best = Infinity;
+    const pick = (x: number, y: number, r: number) => {
+      const d = Math.hypot(x - w.x, y - w.y);
+      if (d < best && Math.abs(x - w.x) < view.w * 0.46 && Math.abs(y - w.y) < view.h * 0.42) {
+        best = d;
+        target = { x, y, r };
+      }
+    };
+    if (!(t & TUTORIAL_EAT)) {
+      for (const it of this.prey.items) if (!it.dying && this.prey.isEdible(it, w.mouthRadius)) pick(it.x, it.y, it.r);
+    } else if (!(t & TUTORIAL_COIN)) {
+      for (const tr of this.treasure.items) if (!tr.dying && this.treasure.isEdible(tr, w.mouthRadius)) pick(tr.x, tr.y, tr.r);
+      // подсказку про монеты показываем, когда предыдущее сообщение (например «Отлично!») уже закончилось
+      if (target && !this.coinHinted && state.toast.left <= 0) {
+        this.coinHinted = true;
+        showToast('tut_coin', 4.5);
+      }
+    }
+    const tg = target as { x: number; y: number; r: number } | null;
+    if (!tg) {
+      if (this.tutArrow.visible) this.tutArrow.setVisible(false);
+      return;
+    }
+    const cam = this.cameras.main;
+    const k = 74 / cam.zoom / 64;
+    const bob = Math.sin(now / 160) * 10 * k * 2;
+    // цель ниже червя: стрелка снизу и смотрит вверх, чтобы не ложиться на его тело
+    const below = tg.y > w.y + 60 * w.scale;
+    const off = tg.r * 1.35 + 34 * k + bob;
+    this.tutArrow.setVisible(true).setScale(k).setRotation(below ? Math.PI : 0).setPosition(tg.x, below ? tg.y + off : tg.y - off);
   }
 
   // ---------- поверхность ----------
   private onExit(): void {
     const w = this.worm;
     sfx.play('jump');
-    this.fx.burst(w.x, 0, w.scale, { count: 12, tex: 'fx-dot', colors: DIRT, speed: 420, life: 0.7, gravity: 1500, size: 16 });
+    this.fx.burst(w.x, 0, w.scale, { count: 12, frame: 'fx-dirt-chunk', colors: DIRT, speed: 420, life: 0.7, gravity: 1500, size: 20 });
+    this.fx.burst(w.x, 0, w.scale, { count: 3, frame: 'fx-dust-poof', colors: [0xf0d9b5], speed: 200, life: 0.7, gravity: 0, size: 70 });
   }
 
   private onEnter(): void {
     const w = this.worm;
     sfx.play('splash');
-    this.fx.burst(w.x, 0, w.scale, { count: 14, tex: 'fx-dot', colors: DIRT, speed: 360, life: 0.7, gravity: 1500, size: 16 });
+    this.fx.burst(w.x, 0, w.scale, { count: 14, frame: 'fx-dirt-chunk', colors: DIRT, speed: 360, life: 0.7, gravity: 1500, size: 20 });
+    this.fx.burst(w.x, 0, w.scale, { count: 3, frame: 'fx-dust-poof', colors: [0xf0d9b5], speed: 200, life: 0.7, gravity: 0, size: 70 });
   }
 
   // ---------- пауза платформы ----------
@@ -305,8 +438,11 @@ export class GameScene extends Phaser.Scene {
         x: Math.round(this.worm.x),
         y: Math.round(this.worm.y),
         prey: this.prey.items.length,
+        treasures: this.treasure.items.length,
+        coins: state.coins,
         fps: Math.round(this.game.loop.actualFps),
         paused: state.paused,
+        selecting: state.selecting,
         zoom: Math.round(this.cameras.main.zoom * 1000) / 1000,
         canvasW: this.game.canvas.width,
         canvasH: this.game.canvas.height,
@@ -314,6 +450,7 @@ export class GameScene extends Phaser.Scene {
         canExit: this.worm.canExit,
         toast: state.toast.left > 0 ? state.toast.key : null,
         jaw: Math.round(this.worm.jaw * 100) / 100,
+        tutorial: save.data.tutorial,
       }),
       setSkin: (id: SkinId) => {
         this.worm.setSkin(id);
@@ -336,6 +473,15 @@ export class GameScene extends Phaser.Scene {
         this.camReady = false;
       },
       world: () => ({ width: WORLD_WIDTH, surfaceTier: SURFACE_TIER }),
+      addCoins: (n) => {
+        state.coins = Math.max(0, state.coins + n);
+        save.patch({ coins: state.coins });
+      },
+      openSelect: () => this.openSelect(false),
+      resetTutorial: () => {
+        save.patch({ tutorial: 0 });
+        this.coinHinted = false;
+      },
       resetSave: () => {
         save.reset();
         window.location.reload();
