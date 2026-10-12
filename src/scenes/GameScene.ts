@@ -2,6 +2,8 @@ import Phaser from 'phaser';
 import { Worm, type Steer } from '../game/Worm';
 import { PreySystem, type PreyItem, type View } from '../game/Prey';
 import { TreasureSystem, type TreasureItem } from '../game/Treasure';
+import { Challenges, type ChallengeDone } from '../game/Challenges';
+import type { ChallengeKind } from '../data/challenges';
 import { WorldBackground } from '../game/Background';
 import { Fx } from '../game/Fx';
 import { controls } from '../core/controls';
@@ -11,7 +13,7 @@ import { state, hitsUi, showToast } from '../core/state';
 import { platform } from '../platform/platform';
 import { save, TUTORIAL_COIN, TUTORIAL_EAT } from '../platform/save';
 import { MAX_TIER, growthFor, growthNeeded, segmentsAt, wormScale } from '../data/growth';
-import { clampLevel, type Upgrades } from '../data/upgrades';
+import { clampLevel, type LineId, type Upgrades } from '../data/upgrades';
 import { SURFACE_TIER, WORLD_WIDTH } from '../data/world';
 import type { SkinId } from '../data/skins';
 import { mountDevPanel, type DevApi } from '../dev/devPanel';
@@ -43,6 +45,11 @@ export class GameScene extends Phaser.Scene {
   private digT = 0;
   private tutArrow!: Phaser.GameObjects.Image;
   private coinHinted = false;
+  /** Испытания (концепт, раздел 10): прогресс копится здесь, в сохранении лежит список. */
+  quests = new Challenges();
+  /** Самая большая высота над землёй за текущий прыжок, px мира. */
+  private maxHeight = 0;
+  private tailT = 0;
 
   constructor() {
     super('Game');
@@ -60,6 +67,8 @@ export class GameScene extends Phaser.Scene {
     state.coins = d.coins;
     state.paused = false;
     state.selecting = false;
+    state.shopOpen = false;
+    if (this.quests.load(d.ch, d.tier)) save.patch({ ch: this.quests.list });
 
     const tf = this.fractionalTier();
     const S0 = wormScale(tf);
@@ -84,6 +93,9 @@ export class GameScene extends Phaser.Scene {
     platform.onPause((p) => this.onPlatformPause(p));
     this.game.events.on('skin-chosen', (id: SkinId) => this.onSkinChosen(id));
     this.game.events.on('open-select', () => this.openSelect(false));
+    this.game.events.on('open-shop', () => this.openShop());
+    this.game.events.on('upgrade-bought', (_line: LineId, _level: number) => this.worm.setUpgrades(save.data.up));
+    this.game.events.on('shop-closed', (bought: boolean) => this.onShopClosed(bought));
 
     this.scene.launch('UI');
     // Игрок может начинать: сообщаем платформе (пп. 1.19.2, 1.19.3). При первом запуске это экран выбора персонажа.
@@ -104,6 +116,26 @@ export class GameScene extends Phaser.Scene {
     this.scene.bringToTop('Select');
   }
 
+  // ---------- магазин ----------
+  private openShop(): void {
+    if (state.selecting || state.shopOpen || state.paused) return;
+    state.shopOpen = true;
+    platform.gameplay(false);
+    this.scene.launch('Shop');
+    this.scene.bringToTop('Shop');
+  }
+
+  /** Магазин закрыт: игра продолжается; после покупки червь «вспыхивает» новой деталью. */
+  private onShopClosed(bought: boolean): void {
+    platform.gameplay(true);
+    if (!bought) return;
+    const w = this.worm;
+    this.fx.ring(w.x, w.y, w.scale * 1.3, 0xffd23f);
+    this.fx.burst(w.x, w.y, w.scale, { count: 20, frame: 'fx-star', colors: STARS, speed: 520, life: 0.9, gravity: 600, size: 28 });
+    w.flash('happy', 900, this.time.now);
+    sfx.play('grow');
+  }
+
   private onSkinChosen(id: SkinId): void {
     this.worm.setSkin(id);
     if (this.firstRun) {
@@ -118,7 +150,7 @@ export class GameScene extends Phaser.Scene {
     this.input.addPointer(2);
     const onPointer = (p: Phaser.Input.Pointer, down: boolean) => {
       if (down) sfx.unlock();
-      if (state.selecting || hitsUi(p.x, p.y)) return;
+      if (state.selecting || state.shopOpen || hitsUi(p.x, p.y)) return;
       if (p.wasTouch && !p.isDown) return;
       this.pointerActive = true;
       this.pointer.x = p.x;
@@ -165,7 +197,7 @@ export class GameScene extends Phaser.Scene {
 
   // ---------- шаг ----------
   override update(time: number, delta: number): void {
-    if (state.paused || state.selecting) return;
+    if (state.paused || state.selecting || state.shopOpen) return;
     const dt = Math.min(delta / 1000, 0.05);
     const w = this.worm;
     w.canExit = state.tier >= SURFACE_TIER;
@@ -176,6 +208,8 @@ export class GameScene extends Phaser.Scene {
     this.checkEating(time);
     this.dig(dt);
     this.updateTutorial(time);
+    this.updateTrail(dt);
+    this.trackJump();
     this.updateCamera(dt, false);
     this.bg.update(this.cameras.main, w.scale);
     this.fx.update(dt);
@@ -257,6 +291,8 @@ export class GameScene extends Phaser.Scene {
     this.fx.burst(m.x, m.y, w.scale, { count: 7, frame: 'fx-star', colors: STARS, speed: 380, life: 0.5, gravity: 900, size: 22 });
     this.prey.consume(it, m.x, m.y);
     this.eaten++;
+    this.quest('eat', 1);
+    this.quest(it.species, 1);
     this.addGrowth(growthFor(it.r, w.scale));
     if (!(save.data.tutorial & TUTORIAL_EAT)) {
       save.patch({ tutorial: save.data.tutorial | TUTORIAL_EAT });
@@ -285,6 +321,9 @@ export class GameScene extends Phaser.Scene {
     state.coins += tr.value;
     save.patch({ coins: state.coins });
     if (!(save.data.tutorial & TUTORIAL_COIN)) save.patch({ tutorial: save.data.tutorial | TUTORIAL_COIN });
+    this.quest('coins', tr.value);
+    if (tr.spec.kind === 'gem') this.quest('gems', 1);
+    else if (tr.spec.kind === 'chestSmall' || tr.spec.kind === 'chestBig') this.quest('chests', 1);
   }
 
   /** Блеск на сокровище: крохотная искра, чтобы оно привлекало взгляд. */
@@ -324,7 +363,10 @@ export class GameScene extends Phaser.Scene {
     if (state.tier >= MAX_TIER) state.growth = Math.min(state.growth, state.need);
     save.patch({ tier: state.tier, growth: state.growth });
     this.applySize();
-    if (up) this.tierUp();
+    if (up) {
+      this.tierUp();
+      this.finishChallenges(this.quests.reportTier(state.tier));
+    }
     // поверхность открывается при пересечении порога, даже если одним укусом перескочили через тир
     if (tierBefore < SURFACE_TIER && state.tier >= SURFACE_TIER) this.surfaceUnlocked();
   }
@@ -395,10 +437,58 @@ export class GameScene extends Phaser.Scene {
     this.tutArrow.setVisible(true).setScale(k).setRotation(below ? Math.PI : 0).setPosition(tg.x, below ? tg.y + off : tg.y - off);
   }
 
+  // ---------- испытания ----------
+  /** Сообщить об событии: прогресс копится, выполненное даёт монеты. */
+  private quest(kind: ChallengeKind, amount: number): void {
+    this.finishChallenges(this.quests.report(kind, amount, state.tier));
+  }
+
+  private finishChallenges(done: ChallengeDone[]): void {
+    if (!done.length) {
+      save.patch({ ch: this.quests.list });
+      return;
+    }
+    let sum = 0;
+    for (const d of done) sum += d.reward;
+    state.coins += sum;
+    save.patch({ coins: state.coins, ch: this.quests.list });
+    sfx.play('quest');
+    showToast('ch_done', 4, { n: sum });
+    const w = this.worm;
+    this.fx.floatText(w.x, w.y - 90 * w.scale, w.scale, `+${sum}`);
+    this.fx.burst(w.x, w.y, w.scale, { count: 14, frame: 'fx-coin-sparkle', colors: GOLD, speed: 460, life: 0.8, gravity: 400, size: 32 });
+  }
+
+  /** Высота прыжка над землёй: «выпрыгнуть» засчитывается при выходе, тут запоминается наибольшая высота (для проверок). */
+  private trackJump(): void {
+    const w = this.worm;
+    if (w.inAir) this.maxHeight = Math.max(this.maxHeight, -w.y);
+    else this.maxHeight = 0;
+  }
+
+  /** Линии скорости и золотые искры за хвостом на старших ступенях гребня. */
+  private updateTrail(dt: number): void {
+    const w = this.worm;
+    const lvl = w.upgrades.speed;
+    if (lvl < 4 || w.speed < 0.55 * w.swimSpeed) return;
+    this.tailT -= dt;
+    if (this.tailT > 0) return;
+    this.tailT = lvl >= 5 ? 0.05 : 0.07;
+    const tp = w.tailPoint();
+    const back = tp.a + Math.PI;
+    const k = w.scale;
+    const spread = (Math.random() - 0.5) * 70 * k;
+    const bx = tp.x + Math.cos(back) * 150 * k - Math.sin(back) * spread;
+    const by = tp.y + Math.sin(back) * 150 * k + Math.cos(back) * spread;
+    this.fx.streak(bx, by, tp.a, k, lvl >= 5 ? 0xffe27a : 0xbdeaff);
+    if (lvl >= 5) this.fx.burst(bx, by, k, { count: 1, frame: 'fx-coin-sparkle', colors: GOLD, speed: 90, life: 0.8, gravity: 0, size: 34 });
+  }
+
   // ---------- поверхность ----------
   private onExit(): void {
     const w = this.worm;
     sfx.play('jump');
+    this.quest('jump', 1);
     this.fx.burst(w.x, 0, w.scale, { count: 12, frame: 'fx-dirt-chunk', colors: DIRT, speed: 420, life: 0.7, gravity: 1500, size: 20 });
     this.fx.burst(w.x, 0, w.scale, { count: 3, frame: 'fx-dust-poof', colors: [0xf0d9b5], speed: 200, life: 0.7, gravity: 0, size: 70 });
   }
@@ -433,6 +523,13 @@ export class GameScene extends Phaser.Scene {
         segs: Math.floor(this.worm.segs),
         skin: this.worm.getSkin(),
         wings: this.worm.upgrades.jump,
+        armor: this.worm.upgrades.hp,
+        fins: this.worm.upgrades.speed,
+        up: { ...save.data.up },
+        gear: this.worm.gearInfo(),
+        shopOpen: state.shopOpen,
+        challenges: this.quests.list.map((c) => ({ ...c })),
+        maxHeight: Math.round(this.maxHeight),
         eaten: this.eaten,
         inAir: this.worm.inAir,
         x: Math.round(this.worm.x),
@@ -478,6 +575,8 @@ export class GameScene extends Phaser.Scene {
         save.patch({ coins: state.coins });
       },
       openSelect: () => this.openSelect(false),
+      openShop: () => this.openShop(),
+      reportChallenge: (kind: ChallengeKind, amount: number) => this.quest(kind, amount),
       resetTutorial: () => {
         save.patch({ tutorial: 0 });
         this.coinHinted = false;

@@ -3,7 +3,7 @@
  * чтобы не появлялся системный плеер; заодно нет файлов и вопросов лицензии).
  */
 
-export type SfxName = 'eat' | 'chomp' | 'grow' | 'jump' | 'splash' | 'ui' | 'coin' | 'gem' | 'chest' | 'select' | 'bump';
+export type SfxName = 'eat' | 'chomp' | 'grow' | 'jump' | 'splash' | 'ui' | 'coin' | 'gem' | 'chest' | 'select' | 'bump' | 'buy' | 'quest';
 
 type AudioCtor = typeof AudioContext;
 
@@ -147,6 +147,17 @@ class Sfx {
       case 'bump':
         this.burst(0.09, 300, 90, 0.18);
         this.tone(90, 0.1, 'sine', 0.2, 55);
+        break;
+      case 'buy':
+        // «кассовый» звонок: два быстрых тона вверх и звон
+        this.tone(784, 0.08, 'square', 0.16);
+        this.tone(1047, 0.1, 'square', 0.16, undefined, 0.07);
+        [1319, 1568, 2093].forEach((f, i) => this.tone(f, 0.22, 'triangle', 0.18, undefined, 0.16 + i * 0.07));
+        this.burst(0.25, 5000, 2000, 0.1, 0.16);
+        break;
+      case 'quest':
+        [659, 784, 988, 1319].forEach((f, i) => this.tone(f, 0.16, 'square', 0.13, undefined, i * 0.09));
+        this.tone(1319, 0.35, 'triangle', 0.16, undefined, 0.4);
         break;
     }
   }

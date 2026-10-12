@@ -342,7 +342,7 @@ HUD_JS = """(function(){
   function box(o){ return {l: o.x - o.width / 2, t: o.y - o.height / 2, r: o.x + o.width / 2, b: o.y + o.height / 2}; }
   function tb(o){ var g = o.getBounds(); return {l: g.left, t: g.top, r: g.right, b: g.bottom}; }
   var cy = 14 * u + 2 * 24 * u + 12 * u + 16 * u, plateW = 52 * u + ui.coinText.width;
-  return { W: W, H: H, u: u, pause: box(ui.pauseBtn.box), sound: box(ui.soundBtn.box), hint: tb(ui.hint),
+  return { W: W, H: H, u: u, pause: box(ui.pauseBtn.box), sound: box(ui.soundBtn.box), shop: box(ui.shopBtn.box), hint: tb(ui.hint),
            bar: {l: 11 * u, t: 11 * u, r: 68 * u + bw + 3 * u, b: 65 * u},
            coins: {l: 11 * u, t: cy - 21 * u, r: 14 * u + plateW + 3 * u, b: cy + 21 * u},
            title: tb(ui.overlayTitle), resume: box(ui.resumeBtn.box), change: box(ui.changeBtn.box) };
@@ -368,10 +368,11 @@ def t_hud(b, shots):
         time.sleep(0.7)
         r = b.eval(HUD_JS)
         W, H = r['W'], r['H']
-        parts = {k: r[k] for k in ('pause', 'sound', 'hint', 'bar', 'coins')}
+        parts = {k: r[k] for k in ('pause', 'sound', 'shop', 'hint', 'bar', 'coins')}
         cut = [k for k, v in parts.items() if not inside(v, W, H)]
         pairs = [('pause', 'sound'), ('bar', 'sound'), ('bar', 'pause'), ('hint', 'bar'), ('hint', 'sound'), ('hint', 'pause'),
-                 ('coins', 'bar'), ('coins', 'hint'), ('coins', 'sound')]
+                 ('coins', 'bar'), ('coins', 'hint'), ('coins', 'sound'),
+                 ('shop', 'bar'), ('shop', 'coins'), ('shop', 'hint'), ('shop', 'sound'), ('shop', 'pause')]
         over = [f'{a}/{c}' for a, c in pairs if overlap(r[a], r[c])]
         check(f'интерфейс {w}x{h}: ничего не обрезано и не накладывается', not cut and not over, f'обрезано: {cut}, накладывается: {over}, поле {W}x{H}')
         b.key('Escape')
@@ -1035,6 +1036,407 @@ def t_english(b, shots):
     check('English: нет ошибок в консоли', not b.errors(), str(b.errors()))
 
 
+SHOP_SEED = ('{"v":3,"skinChosen":true,"skin":"%s","tier":%d,"growth":0,"coins":%d,"tutorial":%d,'
+             '"up":{"jump":%d,"hp":%d,"speed":%d},"ch":%s}')
+DEFAULT_CH = '[{"k":"eat","n":20,"p":7,"r":14},{"k":"gems","n":3,"p":1,"r":28},{"k":"tier","n":6,"p":4,"r":35}]'
+
+
+def seed_shop(b, coins=0, up=(0, 0, 0), skin='plum', tier=1, tutorial=255, ch=DEFAULT_CH):
+    """Подложить сохранение с монетами и улучшениями до запуска игры (один раз за вкладку, как seed_chosen)."""
+    save = SHOP_SEED % (skin, tier, coins, tutorial, up[0], up[1], up[2], ch)
+    b.add_init_script("try { if (!sessionStorage.getItem('__seeded')) { sessionStorage.setItem('__seeded', '1'); "
+                      "localStorage.setItem('wormgame.save.v1', %s); } } catch (e) {}" % json.dumps(save))
+
+
+def open_shop(b, wait=0.6):
+    b.eval('window.__dev.openShop(); 0')
+    time.sleep(wait)
+
+
+SHOP_JS = """(function(){var g=window.__dev.scene, sc=g.scene.get('Shop'), u=g.game.canvas.width / window.innerWidth;
+  function bb(o){var r=o.getBounds(); return [r.x, r.y, r.width, r.height]}
+  function zr(z){return [z.x, z.y, z.width, z.height]}
+  return {W: g.game.canvas.width, H: g.game.canvas.height, u: u, tab: sc.tab, sel: sc.sel, showWorm: sc.showWorm,
+    stage: sc.stageRect, close: zr(sc.closeZone), title: bb(sc.title), coins: bb(sc.coinText), coinText: sc.coinText.text,
+    tabs: sc.tabs.map(function(t){return {rect: t.rect, text: bb(t.text)}}),
+    ups: sc.ups.map(function(r){return {line: r.line, rect: r.rect, btn: r.btnRect, name: r.name.text, eff: r.eff.text, btnText: r.btnText.text,
+        nameB: bb(r.name), effB: bb(r.eff), labelB: r.label.visible ? bb(r.label) : null, btnTextB: bb(r.btnText), visible: r.name.visible}}),
+    chs: sc.chs.map(function(r){return {rect: r.rect, text: r.text.text, textB: bb(r.text), prog: r.prog.text, progB: bb(r.prog), rewardB: bb(r.reward), visible: r.text.visible}})}})()"""
+
+SHOP_SIZES = [(1920, 1080, 1, False), (1280, 720, 1, False), (1024, 576, 1, False), (3440, 1440, 1, False), (700, 1400, 1, False),
+              (844, 390, 3, True), (568, 320, 2, True), (390, 844, 3, True), (360, 640, 2, True), (320, 568, 2, True)]
+
+
+def ui_rect(b, what):
+    """Прямоугольник элемента интерфейса в px холста: x, y, ширина, высота (например 'shopRect')."""
+    return b.eval("(function(){var r=window.__dev.scene.scene.get('UI').%s; return [r.x, r.y, r.w, r.h]})()" % what)
+
+
+def center(r):
+    return r[0] + r[2] / 2, r[1] + r[3] / 2
+
+
+def click_canvas(b, r):
+    x, y = center(r)
+    p = canvas_to_client(b, x, y)
+    b.click(p['x'], p['y'])
+
+
+def t_gear(b, shots):
+    """Броня и гребень: по ступеням на черве нужные детали, у каждого из трёх персонажей, отражение при повороте, число деталей растёт с длиной."""
+    seed_chosen(b)
+    boot(b, URL, choose=False)
+    info = "window.__dev.state().gear"
+    g0 = b.eval(info)
+    check('броня и гребень: по умолчанию нет ни одной детали', g0['armor'] == 0 and g0['fins'] == 0 and g0['plates'] == 0 and g0['finSegs'] == 0
+          and not g0['head'] and not g0['tail'], str(g0))
+    # все кадры есть в атласах всех трёх персонажей
+    miss = b.eval("""(function(){var g=window.__dev.scene, out=[];
+      ['peach','salad','plum'].forEach(function(s){var tx=g.textures.get('gear-'+s); for (var n=1;n<=5;n++){
+        ['armor-'+s+'-t'+n+'-plate','armor-'+s+'-t'+n+'-head','fin-'+s+'-t'+n+'-seg'].forEach(function(f){ if(!tx.has(f)) out.push(f) });
+        if (n>=3 && !tx.has('armor-'+s+'-t'+n+'-horn')) out.push('horn'+n+s);
+        if (n>=2 && !tx.has('fin-'+s+'-t'+n+'-tail')) out.push('tail'+n+s); } });
+      return out})()""")
+    check('броня и гребень: в атласах всех персонажей есть все кадры', not miss, str(miss))
+    b.eval("window.__dev.setTier(8); 0")
+    time.sleep(0.8)
+    for skin in ('peach', 'salad', 'plum'):
+        b.eval("window.__dev.setSkin('%s'); window.__dev.setUpgrade('hp', 0); window.__dev.setUpgrade('speed', 0); 0" % skin)
+        time.sleep(0.3)
+        bad = []
+        for n in range(1, 6):
+            b.eval("window.__dev.setUpgrade('hp', %d); 0" % n)
+            time.sleep(0.35)
+            g = b.eval(info)
+            ok = g['armor'] == n and g['plates'] > 3 and g['head'] and g['hornBack'] == (n >= 3) and g['crown'] == (skin != 'peach' and n < 4)
+            if not ok:
+                bad.append((n, g))
+        check(f'броня ({skin}): ступени 1-5 дают пластины и шлем, рога с 3-й, макушка (у кого есть) скрыта с 4-й', not bad, str(bad)[:300])
+        bad = []
+        b.eval("window.__dev.setUpgrade('hp', 0); 0")
+        for n in range(1, 6):
+            b.eval("window.__dev.setUpgrade('speed', %d); 0" % n)
+            time.sleep(0.35)
+            g = b.eval(info)
+            if not (g['fins'] == n and g['finSegs'] > 3 and g['tail'] == (n >= 2)):
+                bad.append((n, g))
+        check(f'гребень ({skin}): ступени 1-5 дают шипы вдоль спины, хвостовой плавник со 2-й', not bad, str(bad)[:300])
+    b.eval("window.__dev.setSkin('plum'); window.__dev.setUpgrade('hp', 5); window.__dev.setUpgrade('speed', 5); window.__dev.setUpgrade('jump', 3); 0")
+    time.sleep(0.5)
+    b.screenshot(shots / 'g21-gear-full.png')
+    # детали на спине: над телом, когда червь плывёт вправо, и отражаются, когда влево
+    b.eval("window.__dev.setPos(0, 700); window.__dev.autopilot(false); 0")
+    time.sleep(0.3)
+    up = b.eval("""(function(){var w=window.__dev.scene.worm, bad=0, n=0;
+      w.plates.concat(w.finSegs).forEach(function(p){ if(!p.visible) return; n++; if (!(p.y < w.y + 4)) bad++ });
+      return {n:n, bad:bad, flip: w.plates.filter(function(p){return p.visible && p.flipY}).length}})()""")
+    check('броня и гребень: при ходе вправо детали на верхней стороне тела и не отражены', up['n'] > 10 and up['bad'] <= 1 and up['flip'] == 0, str(up))
+    b.eval("window.__dev.scene.worm.heading = Math.PI; 0")
+    t0 = time.time()
+    left = None
+    while time.time() - t0 < 3:
+        time.sleep(0.3)
+        left = b.eval("""(function(){var w=window.__dev.scene.worm, n=0, f=0;
+          w.plates.forEach(function(p){ if(!p.visible) return; n++; if (p.flipY) f++ }); return {n:n, f:f}})()""")
+        if left['n'] and left['f'] == left['n']:
+            break
+    check('броня и гребень: при ходе влево детали отражены и остаются сверху', left and left['n'] > 5 and left['f'] >= left['n'] - 1, str(left))
+    # длиннее тело — больше деталей
+    c8 = b.eval("window.__dev.state().gear.plates + window.__dev.state().gear.finSegs")
+    b.eval("window.__dev.setTier(14); 0")
+    time.sleep(1.2)
+    c14 = b.eval("window.__dev.scene.worm.plates.length + window.__dev.scene.worm.finSegs.length")
+    check('броня и гребень: у более длинного червя деталей больше', c14 > c8, f'{c8} -> {c14}')
+    check('броня и гребень: нет ошибок в консоли', not b.errors(), str(b.errors()))
+
+
+def t_shop(b, shots):
+    """Магазин: открытие кнопкой и клавишей, пауза, покупка (монеты, ступень, сохранение, червь), нехватка монет, максимум, закрытие, F5."""
+    b.add_init_script(FAKE_SDK.replace('__LANG__', 'ru'))
+    seed_shop(b, coins=10, tutorial=3)
+    boot(b, URL, choose=False)
+    check('магазин: кнопка магазина есть в интерфейсе, не меньше 44 CSS-px',
+          min(ui_rect(b, 'shopRect')[2:]) / b.eval('window.__dev.scene.scene.get("UI").u') >= 44)
+    check('магазин: при нехватке монет красной точки нет', b.eval("window.__dev.scene.scene.get('UI').shopDot.commandBuffer.length") == 0)
+    # монет хватает: красная точка, подсказка и стрелка к кнопке (один раз)
+    b.eval('window.__dev.addCoins(20); 0')
+    time.sleep(0.5)
+    check('магазин: когда монет хватает, на кнопке красная точка', b.eval("window.__dev.scene.scene.get('UI').shopDot.commandBuffer.length") > 0)
+    check('магазин: подсказка «хватает монет на улучшение»', state(b)['toast'] == 'tut_shop', str(state(b)['toast']))
+    check('магазин: стрелка показывает на кнопку, пока магазин не открывали', b.eval("window.__dev.scene.scene.get('UI').shopArrow.visible") is True)
+    b.screenshot(shots / 'g22-shop-hud.png')
+    # открыть кликом по кнопке
+    log0 = len(b.eval('window.__sdkLog'))
+    click_canvas(b, ui_rect(b, 'shopRect'))
+    time.sleep(0.7)
+    s = state(b)
+    check('магазин: клик по кнопке открывает магазин', s['shopOpen'] is True)
+    check('магазин: gameplay остановлен (stop), пока магазин открыт', 'stop' in b.eval('window.__sdkLog')[log0:], str(b.eval('window.__sdkLog')[log0:]))
+    x0 = state(b)['x']
+    time.sleep(1.0)
+    check('магазин: игра на паузе, червь стоит', abs(state(b)['x'] - x0) < 1, f"{x0} -> {state(b)['x']}")
+    check('магазин: открытие записано в обучение, стрелка пропала', save_field(b, 'tutorial') & 8 == 8 and b.eval("window.__dev.scene.scene.get('UI').shopArrow.visible") is False)
+    sh = b.eval(SHOP_JS)
+    check('магазин: три линии: прыжок, здоровье, скорость; монеты показаны', [r['line'] for r in sh['ups']] == ['jump', 'hp', 'speed'] and sh['coinText'] == '30', f"{[r['line'] for r in sh['ups']]}, {sh['coinText']}")
+    check('магазин: у первой ступени цены 25, у всех линий одинаково', [r['btnText'] for r in sh['ups']] == ['25', '25', '25'], str([r['btnText'] for r in sh['ups']]))
+    b.screenshot(shots / 'g23-shop.png')
+    # купить прыжок (первая строка): монеты 30 -> 5, крылья 1
+    click_canvas(b, sh['ups'][0]['btn'])
+    time.sleep(0.6)
+    s = state(b)
+    check('покупка: монеты списаны', s['coins'] == 5, f"coins={s['coins']}")
+    check('покупка: ступень прыжка выросла до 1, на черве появились крылья', s['up']['jump'] == 1 and s['wings'] == 1, str(s['up']))
+    sv = b.eval("JSON.parse(localStorage.getItem('wormgame.save.v1'))")
+    check('покупка: сохранено сразу (монеты и ступень)', sv['coins'] == 5 and sv['up']['jump'] == 1, f"{sv['coins']}, {sv['up']}")
+    sh = b.eval(SHOP_JS)
+    check('покупка: цена и подпись строки обновились (следующая ступень 60)', sh['ups'][0]['btnText'] == '60' and 'Птичьи' in sh['ups'][0]['name'], f"{sh['ups'][0]['btnText']}, {sh['ups'][0]['name']}")
+    wings_vis = b.eval("window.__dev.scene.scene.get('Shop').worm.upgrades.jump")
+    check('покупка: червь-витрина в магазине тоже получил крылья', wings_vis == 1, str(wings_vis))
+    b.screenshot(shots / 'g24-shop-bought.png')
+    # не хватает монет: ничего не меняется, появляется «Не хватает»
+    click_canvas(b, sh['ups'][1]['btn'])
+    time.sleep(0.3)
+    s2 = state(b)
+    need = b.eval("window.__dev.scene.scene.get('Shop').children.list.filter(function(c){return c.type==='Text' && c.text.indexOf('Не хватает')===0}).map(function(c){return c.text})")
+    check('нехватка монет: покупка не состоялась, монеты и ступени прежние', s2['coins'] == 5 and s2['up']['hp'] == 0, f"{s2['coins']}, {s2['up']}")
+    check('нехватка монет: у кнопки всплыла подпись «Не хватает 20»', need == ['Не хватает 20'], str(need))
+    # закрыть клавишей Escape: магазин закрылся, пауза не включилась, игра продолжилась (start)
+    log1 = len(b.eval('window.__sdkLog'))
+    b.key('Escape')
+    time.sleep(0.6)
+    s3 = state(b)
+    check('закрытие: Escape закрывает магазин и не включает паузу', s3['shopOpen'] is False and s3['paused'] is False, f"shop={s3['shopOpen']}, paused={s3['paused']}")
+    check('закрытие: gameplay снова запущен (start)', 'start' in b.eval('window.__sdkLog')[log1:], str(b.eval('window.__sdkLog')[log1:]))
+    x1 = state(b)['x']
+    time.sleep(0.8)
+    check('закрытие: игра пошла дальше, червь плывёт', abs(state(b)['x'] - x1) > 20, f"{x1} -> {state(b)['x']}")
+    # клавиша B открывает и закрывает, Enter покупает выбранное, цифра покупает линию
+    b.eval('window.__dev.addCoins(200); 0')
+    b.key('KeyB')
+    time.sleep(0.6)
+    check('магазин: клавиша B открывает', state(b)['shopOpen'] is True)
+    b.key('ArrowDown')  # выбрана вторая линия (здоровье)
+    time.sleep(0.2)
+    b.key('Enter')
+    time.sleep(0.5)
+    s4 = state(b)
+    check('покупка клавишами: Enter покупает выбранную линию (здоровье 1, -25)', s4['up']['hp'] == 1 and s4['coins'] == 5 + 200 - 25, f"{s4['up']}, coins={s4['coins']}")
+    b.key('Digit3')
+    time.sleep(0.5)
+    s5 = state(b)
+    check('покупка клавишами: цифра 3 покупает скорость (-25)', s5['up']['speed'] == 1 and s5['coins'] == s4['coins'] - 25, f"{s5['up']}, coins={s5['coins']}")
+    g = s5['gear']
+    check('покупка: на черве появились броня и гребень', g['armor'] == 1 and g['fins'] == 1 and g['head'], str(g))
+    b.key('KeyB')
+    time.sleep(0.6)
+    check('магазин: клавиша B закрывает', state(b)['shopOpen'] is False)
+    # скорость выросла: бонус ступени 1 = +8%
+    sp = b.eval("window.__dev.scene.worm.swimSpeed / (330 * window.__dev.scene.worm.scale)")
+    check('скорость: ступень 1 прибавляет 8% к скорости', abs(sp - 1.08) < 0.01, f'{sp:.3f}')
+    # F5: купленное и монеты на месте
+    coins, up = state(b)['coins'], state(b)['up']
+    b.open(URL)
+    b.wait_for('!!window.__dev', 30)
+    time.sleep(1.0)
+    s6 = state(b)
+    check('обновление страницы: монеты и ступени улучшений на месте', s6['up'] == up and s6['coins'] >= coins, f"{s6['up']} / {s6['coins']}")
+    check('обновление страницы: на черве те же крылья, броня и гребень', s6['wings'] == 1 and s6['armor'] == 1 and s6['fins'] == 1, str((s6['wings'], s6['armor'], s6['fins'])))
+    # максимум: по 5 ступеней, кнопка «Максимум» и покупка невозможна
+    b.eval("window.__dev.setUpgrade('jump', 5); window.__dev.setUpgrade('hp', 5); window.__dev.setUpgrade('speed', 5); window.__dev.addCoins(5000); 0")
+    open_shop(b)
+    sh = b.eval(SHOP_JS)
+    check('максимум: на всех линиях «Максимум»', [r['btnText'] for r in sh['ups']] == ['Максимум'] * 3, str([r['btnText'] for r in sh['ups']]))
+    c0 = state(b)['coins']
+    click_canvas(b, sh['ups'][0]['btn'])
+    time.sleep(0.3)
+    check('максимум: нажатие ничего не покупает', state(b)['coins'] == c0 and state(b)['up']['jump'] == 5, f"{c0} -> {state(b)['coins']}")
+    b.screenshot(shots / 'g25-shop-max.png')
+    b.key('Escape')
+    time.sleep(0.4)
+    check('магазин: нет ошибок в консоли', not b.errors(), str(b.errors()))
+
+
+def t_shop_guard(b, shots):
+    """Под магазином мышь не управляет червём, Escape не включает паузу; из паузы магазин не открывается; выбор персонажа важнее."""
+    seed_shop(b, coins=100, tutorial=255)
+    boot(b, URL, choose=False)
+    open_shop(b)
+    s0 = state(b)
+    p = canvas_to_client(b, 100, 100)
+    b.mouse(p['x'] + 400, p['y'] + 200, 'move')
+    b.click(p['x'] + 300, p['y'] + 150)
+    time.sleep(0.8)
+    s1 = state(b)
+    check('магазин: игра стоит, червь не двигается и не поворачивается от мыши', abs(s1['x'] - s0['x']) < 1 and abs(s1['y'] - s0['y']) < 1, f"{s0['x']},{s0['y']} -> {s1['x']},{s1['y']}")
+    check('магазин: открыт после кликов мимо кнопок (затемнение ловит касания)', s1['shopOpen'] is True)
+    b.key('Escape')
+    time.sleep(0.5)
+    check('магазин: Escape закрыл магазин, а не включил паузу', state(b)['shopOpen'] is False and state(b)['paused'] is False)
+    b.key('Escape')
+    time.sleep(0.3)
+    check('пауза: Escape включает паузу', state(b)['paused'] is True)
+    b.key('KeyB')
+    time.sleep(0.4)
+    check('пауза: магазин из паузы не открывается', state(b)['shopOpen'] is False)
+    b.key('Escape')
+    time.sleep(0.3)
+    # открытый выбор персонажа не пускает в магазин
+    b.eval('window.__dev.openSelect(); 0')
+    time.sleep(0.5)
+    b.key('KeyB')
+    time.sleep(0.4)
+    check('выбор персонажа: магазин поверх него не открывается', state(b)['shopOpen'] is False and state(b)['selecting'] is True)
+    b.key('Escape')
+    time.sleep(0.3)
+    check('магазин: нет ошибок в консоли', not b.errors(), str(b.errors()))
+
+
+def t_shop_sizes(b, shots):
+    """Магазин при любом размере окна: всё на экране, ничего не накладывается, кнопки не меньше 44 CSS-px, подписи в строках (пп. 1.8, 1.10)."""
+    seed_shop(b, coins=130, up=(2, 1, 3), tier=4)
+    boot(b, URL, choose=False)
+    open_shop(b)
+    for (w, h, dpr, mobile) in SHOP_SIZES:
+        b.set_viewport(w, h, dpr, mobile)
+        time.sleep(0.8)
+        for tab in (0, 1):
+            if b.eval(SHOP_JS)['tab'] != tab:
+                b.key('ArrowRight' if tab else 'ArrowLeft')
+                time.sleep(0.4)
+            sh = b.eval(SHOP_JS)
+            W, H, u = sh['W'], sh['H'], sh['u']
+            rows = sh['ups'] if tab == 0 else sh['chs']
+            rects = [r['rect'] for r in rows]
+            problems = []
+            for name, rc in [('close', sh['close'])] + [(f'tab{i}', t['rect']) for i, t in enumerate(sh['tabs'])] + [(f'row{i}', rc) for i, rc in enumerate(rects)]:
+                if not rect_inside(rc, W, H):
+                    problems.append(f'{name} вне экрана')
+            for i in range(3):
+                for j in range(i + 1, 3):
+                    if rects_overlap(rects[i], rects[j]):
+                        problems.append(f'строки {i}/{j} накладываются')
+            if rects_overlap(sh['tabs'][0]['rect'], sh['tabs'][1]['rect']):
+                problems.append('вкладки накладываются')
+            small = [n for n, rc in [('close', sh['close'])] + [(f'tab{i}', t['rect']) for i, t in enumerate(sh['tabs'])]
+                     + ([(f'btn{i}', r['btn']) for i, r in enumerate(sh['ups'])] if tab == 0 else []) if min(rc[2], rc[3]) / u < 43.5]
+            if small:
+                problems.append(f'меньше 44 CSS-px: {small}')
+            if tab == 0:
+                for i, r in enumerate(sh['ups']):
+                    inner = [('name', r['nameB']), ('eff', r['effB'])] + ([('label', r['labelB'])] if r['labelB'] else [])
+                    for nm, bbox in inner:
+                        if bbox[1] < r['rect'][1] - 1 or bbox[1] + bbox[3] > r['rect'][1] + r['rect'][3] + 1 or bbox[0] + bbox[2] > r['btn'][0] + 1 and r['btn'][1] < bbox[1] + bbox[3] and bbox[1] < r['btn'][1] + r['btn'][3]:
+                            problems.append(f'строка {i}: «{nm}» выходит за строку или на кнопку')
+                    bt = r['btnTextB']
+                    if bt[0] < r['btn'][0] - 1 or bt[0] + bt[2] > r['btn'][0] + r['btn'][2] + 1:
+                        problems.append(f'строка {i}: цена не помещается в кнопку')
+            else:
+                for i, r in enumerate(sh['chs']):
+                    for nm, bbox in (('text', r['textB']), ('prog', r['progB'])):
+                        if bbox[1] < r['rect'][1] - 1 or bbox[1] + bbox[3] > r['rect'][1] + r['rect'][3] + 1:
+                            problems.append(f'испытание {i}: «{nm}» выходит за строку')
+            check(f'магазин {w}x{h}, вкладка {"испытаний" if tab else "улучшений"}: всё на экране, не накладывается, кнопки от 44 CSS-px, подписи в строках', not problems, '; '.join(problems)[:300])
+        if (w, h) in ((1280, 720), (360, 640), (568, 320)):
+            b.key('ArrowLeft')
+            time.sleep(0.3)
+            b.screenshot(shots / f'g26-shop-{w}x{h}.png')
+    b.set_viewport(1280, 720, 1, False)
+    check('магазин: нет ошибок в консоли', not b.errors(), str(b.errors()))
+
+
+def save_field(b, name):
+    return b.eval("JSON.parse(localStorage.getItem('wormgame.save.v1'))['%s']" % name)
+
+
+def t_challenges(b, shots):
+    """Испытания: три разных при старте, прогресс от еды и сокровищ, награда и замена выполненного, сохранение, вкладка в магазине."""
+    seed_shop(b, coins=0, tutorial=3, ch='[]')
+    boot(b, URL, choose=False)
+    ch = state(b)['challenges']
+    check('испытания: при первом запуске выданы три разных', len(ch) == 3 and len({c['k'] for c in ch}) == 3, str(ch))
+    check('испытания: на 1-м тире нет самоцветов, сундуков и прыжков (глубоко и поверхность закрыта)', not any(c['k'] in ('gems', 'chests', 'jump') for c in ch), str([c['k'] for c in ch]))
+    sv = save_field(b, 'ch')
+    check('испытания: список сохранён', isinstance(sv, list) and len(sv) == 3, str(sv))
+    # детерминированный набор
+    b.eval("""window.__dev.scene.quests.load([{k:'eat',n:2,p:0,r:10},{k:'coins',n:5,p:0,r:12},{k:'tier',n:3,p:1,r:20}], 1);
+      window.__dev.scene.quests.load; 0""")
+    b.eval("window.__dev.reportChallenge('eat', 1); 0")
+    c = state(b)['challenges']
+    check('испытания: прогресс прибавляется', c[0]['k'] == 'eat' and c[0]['p'] == 1, str(c[0]))
+    coins0 = state(b)['coins']
+    b.eval("window.__dev.reportChallenge('eat', 1); 0")
+    time.sleep(0.2)
+    s = state(b)
+    check('испытания: выполненное даёт награду (+10 монет)', s['coins'] == coins0 + 10, f"{coins0} -> {s['coins']}")
+    check('испытания: выполненное заменено новым другого вида, прогресс 0', s['challenges'][0]['k'] != 'eat' and s['challenges'][0]['p'] == 0, str(s['challenges'][0]))
+    check('испытания: сообщение «Испытание выполнено»', s['toast'] == 'ch_done', str(s['toast']))
+    check('испытания: монеты и список сохранены сразу', save_field(b, 'coins') == s['coins'] and len(save_field(b, 'ch')) == 3)
+    # «достигните уровня»: растёт вместе с тиром
+    b.eval("""window.__dev.scene.quests.load([{k:'tier',n:3,p:1,r:20},{k:'eat',n:50,p:0,r:10},{k:'coins',n:50,p:0,r:12}], 1); 0""")
+    coins1 = state(b)['coins']
+    b.eval("window.__dev.addGrowth(100000); 0")
+    time.sleep(0.4)
+    s = state(b)
+    check('испытания: «достигните уровня 3» выполнено ростом, награда 20 начислена', s['coins'] >= coins1 + 20 and s['challenges'][0]['k'] != 'tier', f"{coins1} -> {s['coins']}, {s['challenges'][0]}")
+    # реальные события: съесть жука, подобрать монету
+    b.eval("window.__dev.setTier(1); 0")
+    b.eval("""window.__dev.scene.quests.load([{k:'eat',n:50,p:0,r:10},{k:'beetle',n:50,p:0,r:10},{k:'coins',n:50,p:0,r:12}], 1); 0""")
+    b.eval("window.__dev.setPos(0, 700); window.__dev.autopilot(false); 0")
+    b.eval("""(function(){var s=window.__dev.scene; s.treasure.items.forEach(function(t){t.x += 100000});
+      var items=s.prey.items.filter(function(i){return !i.dying}); items.forEach(function(i){i.x += 100000});
+      var it=items[0]; it.x=300; it.y=700; it.baseY=700; it.vx=0; it.turnIn=1e9; it.species='beetle'; it.kind='soil'; it.r=30; return 0})()""")
+    time.sleep(1.8)
+    c = state(b)['challenges']
+    check('испытания: съеденный жук засчитан в «добыча» и «жуки»', c[0]['p'] >= 1 and c[1]['p'] >= 1, str(c))
+    treasure_place(b, 'coin', 7, 20)
+    time.sleep(1.8)
+    c = state(b)['challenges']
+    check('испытания: съеденная монета засчитана по стоимости (+7)', c[2]['p'] >= 7, str(c[2]))
+    # вкладка в магазине
+    open_shop(b)
+    b.key('ArrowRight')
+    time.sleep(0.4)
+    sh = b.eval(SHOP_JS)
+    check('магазин: вкладка «Испытания» показывает три испытания с прогрессом и наградой', sh['tab'] == 1 and all(r['visible'] and '/' in r['prog'] for r in sh['chs']), str([r['text'] for r in sh['chs']]))
+    check('магазин: открытие вкладки испытаний записано (красная точка на вкладке гаснет)', save_field(b, 'tutorial') & 16 == 16, str(save_field(b, 'tutorial')))
+    b.screenshot(shots / 'g27-challenges.png')
+    b.key('Escape')
+    time.sleep(0.3)
+    # F5: список на месте
+    saved = save_field(b, 'ch')
+    b.open(URL)
+    b.wait_for('!!window.__dev', 30)
+    time.sleep(1.0)
+    check('испытания: после обновления страницы те же испытания и прогресс', [(c['k'], c['n'], c['p']) for c in state(b)['challenges']] == [(c['k'], c['n'], c['p']) for c in saved],
+          f"{state(b)['challenges']} / {saved}")
+    check('испытания: нет ошибок в консоли', not b.errors(), str(b.errors()))
+
+
+def t_shop_english(b, shots):
+    """Магазин на английском: подписи помещаются, цена и вкладки на месте."""
+    b.add_init_script(FAKE_SDK.replace('__LANG__', 'en'))
+    seed_shop(b, coins=130, up=(2, 4, 0), tier=4)
+    boot(b, URL, choose=False)
+    open_shop(b)
+    sh = b.eval(SHOP_JS)
+    check('English: названия линий и ступеней на английском', [r['name'] for r in sh['ups']] == ['Light wings', 'Dragon horns', 'Dorsal crest'], str([r['name'] for r in sh['ups']]))
+    check('English: вкладки', b.eval("window.__dev.scene.scene.get('Shop').tabs.map(function(t){return t.text.text})") == ['Upgrades', 'Challenges'])
+    for (w, h, dpr, mobile) in ((1280, 720, 1, False), (360, 640, 2, True), (568, 320, 2, True)):
+        b.set_viewport(w, h, dpr, mobile)
+        time.sleep(0.8)
+        sh = b.eval(SHOP_JS)
+        bad = []
+        for i, r in enumerate(sh['ups']):
+            for nm in ('nameB', 'effB'):
+                bb = r[nm]
+                if bb[1] + bb[3] > r['rect'][1] + r['rect'][3] + 1 or bb[1] < r['rect'][1] - 1:
+                    bad.append((i, nm))
+        check(f'English {w}x{h}: подписи в строках магазина', not bad, str(bad))
+    b.screenshot(shots / 'g28-shop-en.png')
+    b.set_viewport(1280, 720, 1, False)
+    check('English: нет ошибок в консоли', not b.errors(), str(b.errors()))
+
+
 TESTS = {
     'boot': t_boot, 'growth': t_autopilot_growth, 'jump': t_jump, 'wings': t_wings, 'skins': t_skins,
     'sdk': t_sdk, 'lang': t_lang, 'audio': t_audio, 'tiers': t_tiers,
@@ -1043,6 +1445,7 @@ TESTS = {
     'surface': t_surface, 'world': t_world, 'model': t_model, 'prey': t_prey,
     'select': t_select, 'selectscreens': t_select_screens, 'coins': t_coins, 'tutorial': t_tutorial,
     'halo': t_halo, 'bg': t_bg, 'juice': t_juice, 'selectsizes': t_select_sizes, 'english': t_english,
+    'gear': t_gear, 'shop': t_shop, 'shopguard': t_shop_guard, 'shopsizes': t_shop_sizes, 'challenges': t_challenges, 'shopen': t_shop_english,
 }
 
 

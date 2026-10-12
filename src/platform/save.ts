@@ -1,6 +1,7 @@
 import { DEFAULT_SKIN, isSkin, type SkinId } from '../data/skins';
 import { MAX_TIER } from '../data/growth';
 import { clampLevel, type Upgrades } from '../data/upgrades';
+import { CHALLENGE_COUNT, isKind, type ChallengeState } from '../data/challenges';
 import { platform } from './platform';
 
 /**
@@ -9,7 +10,7 @@ import { platform } from './platform';
  * поэтому облачные записи склеиваем и отправляем не чаще раза в 4 секунды.
  */
 export interface SaveData {
-  v: 2;
+  v: 3;
   savedAt: number;
   skin: SkinId;
   /** Игрок уже выбирал персонажа (экран выбора показываем один раз, потом он в меню). */
@@ -21,28 +22,46 @@ export interface SaveData {
   sound: boolean;
   /** Что из обучения пройдено (битовая маска, TUTORIAL_*): подсказки показываем один раз. */
   tutorial: number;
+  /** Активные испытания (концепт, раздел 10). */
+  ch: ChallengeState[];
 }
 
 /** Биты обучения. */
 export const TUTORIAL_EAT = 1; // первая добыча съедена
 export const TUTORIAL_COIN = 2; // первое сокровище съедено
+export const TUTORIAL_SHOP_HINT = 4; // подсказка «хватает монет на улучшение» уже показана
+export const TUTORIAL_SHOP_OPENED = 8; // магазин уже открывали
+export const TUTORIAL_CH_SEEN = 16; // вкладку испытаний уже открывали (красная точка на вкладке гаснет)
 
 export function defaultSave(): SaveData {
-  return { v: 2, savedAt: 0, skin: DEFAULT_SKIN, skinChosen: false, tier: 1, growth: 0, coins: 0, up: { jump: 0, hp: 0, speed: 0 }, sound: true, tutorial: 0 };
+  return { v: 3, savedAt: 0, skin: DEFAULT_SKIN, skinChosen: false, tier: 1, growth: 0, coins: 0, up: { jump: 0, hp: 0, speed: 0 }, sound: true, tutorial: 0, ch: [] };
 }
 
 function num(v: unknown, def: number, min: number, max: number): number {
   return typeof v === 'number' && Number.isFinite(v) ? Math.max(min, Math.min(max, v)) : def;
 }
 
-/** Проверка и починка данных из хранилища: чужое и повреждённое не должно ломать игру. */
+function sanitizeChallenges(raw: unknown): ChallengeState[] {
+  if (!Array.isArray(raw)) return [];
+  const out: ChallengeState[] = [];
+  for (const c of raw.slice(0, CHALLENGE_COUNT)) {
+    if (!c || typeof c !== 'object') continue;
+    const r = c as Record<string, unknown>;
+    if (!isKind(r.k)) continue;
+    const n = Math.round(num(r.n, 1, 1, 1e6));
+    out.push({ k: r.k, n, p: Math.round(num(r.p, 0, 0, n)), r: Math.round(num(r.r, 5, 1, 1e6)) });
+  }
+  return out;
+}
+
+/** Проверка и починка данных из хранилища: чужое и повреждённое не должно ломать игру. Старые версии сохранения читаются. */
 function sanitize(raw: unknown): SaveData | null {
   if (!raw || typeof raw !== 'object') return null;
   const r = raw as Record<string, unknown>;
   const up = (r.up ?? {}) as Record<string, unknown>;
   const d = defaultSave();
   return {
-    v: 2,
+    v: 3,
     savedAt: num(r.savedAt, 0, 0, Number.MAX_SAFE_INTEGER),
     skin: isSkin(r.skin) ? r.skin : d.skin,
     skinChosen: r.skinChosen === true,
@@ -52,6 +71,7 @@ function sanitize(raw: unknown): SaveData | null {
     up: { jump: clampLevel(up.jump), hp: clampLevel(up.hp), speed: clampLevel(up.speed) },
     sound: r.sound !== false,
     tutorial: Math.round(num(r.tutorial, 0, 0, 255)),
+    ch: sanitizeChallenges(r.ch),
   };
 }
 

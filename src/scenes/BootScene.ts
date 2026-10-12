@@ -17,6 +17,7 @@ export class BootScene extends Phaser.Scene {
     this.load.on('progress', (p: number) => setLoaderProgress(p));
     this.load.json('atlas-info', 'assets/atlas-info.json');
     for (const s of SKINS) this.load.atlas(`worm-${s.id}`, `assets/worm-${s.id}.png`, `assets/worm-${s.id}.json`);
+    for (const s of SKINS) this.load.atlas(`gear-${s.id}`, `assets/gear-${s.id}.png`, `assets/gear-${s.id}.json`);
     this.load.atlas('wings', 'assets/wings.png', 'assets/wings.json');
     this.load.atlas('props', 'assets/props.png', 'assets/props.json');
     this.load.atlas('treasure', 'assets/treasure.png', 'assets/treasure.json');

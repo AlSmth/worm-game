@@ -1,11 +1,12 @@
 import Phaser from 'phaser';
-import { state } from '../core/state';
+import { state, showToast } from '../core/state';
 import { controls } from '../core/controls';
 import { sfx } from '../core/audio';
 import { isCoarsePointer } from '../core/layout';
 import { t, type TextKey } from '../core/i18n';
 import { platform } from '../platform/platform';
-import { save, TUTORIAL_EAT } from '../platform/save';
+import { save, TUTORIAL_EAT, TUTORIAL_SHOP_HINT, TUTORIAL_SHOP_OPENED } from '../platform/save';
+import { canAffordAny } from '../data/upgrades';
 
 const FONT = "'Trebuchet MS', 'Segoe UI', Verdana, Arial, sans-serif";
 const INK = 0x2b1b17;
@@ -28,6 +29,12 @@ export class UIScene extends Phaser.Scene {
   private shownCoins = -1;
   private pauseBtn!: Btn;
   private soundBtn!: Btn;
+  private shopBtn!: Btn;
+  private shopDot!: Phaser.GameObjects.Graphics;
+  private shopArrow!: Phaser.GameObjects.Image;
+  /** Прямоугольник кнопки магазина в px холста (для проверок и зоны интерфейса). */
+  private shopRect = { x: 0, y: 0, w: 0, h: 0 };
+  private shopUi: { x: number; y: number; w: number; h: number } | null = null;
   private hint!: Phaser.GameObjects.Text;
   private toastText!: Phaser.GameObjects.Text;
   private toastKey: string | null = null;
@@ -51,6 +58,9 @@ export class UIScene extends Phaser.Scene {
     this.coinText = this.add.text(0, 0, '0', { ...this.textStyle(22, 4.5), color: '#ffe27a' }).setOrigin(0, 0.5).setDepth(12);
     this.pauseBtn = this.makeButton(() => this.togglePause());
     this.soundBtn = this.makeButton(() => this.toggleSound());
+    this.shopBtn = this.makeButton(() => this.game.events.emit('open-shop'));
+    this.shopDot = this.add.graphics().setDepth(17);
+    this.shopArrow = this.add.image(0, 0, 'fx', 'fx-arrow').setDepth(17).setVisible(false);
     this.hint = this.add
       .text(0, 0, '', { ...this.textStyle(20, 4), align: 'center' })
       .setOrigin(0.5, 1)
@@ -68,6 +78,9 @@ export class UIScene extends Phaser.Scene {
     controls.onKey('Escape', () => this.togglePause());
     controls.onKey('KeyP', () => this.togglePause());
     controls.onKey('KeyM', () => this.toggleSound());
+    controls.onKey('KeyB', () => {
+      if (!state.selecting && !state.shopOpen && !state.paused) this.game.events.emit('open-shop');
+    });
     // персонаж выбран: если игра стояла на паузе (выбор открыт из меню), продолжаем
     this.game.events.on('skin-chosen', () => {
       if (state.paused) this.togglePause();
@@ -95,7 +108,7 @@ export class UIScene extends Phaser.Scene {
     const icon = this.add.graphics();
     const box = this.add.container(0, 0, [bg, icon]).setDepth(15);
     box.on('pointerdown', () => {
-      if (state.selecting) return;
+      if (state.selecting || state.shopOpen) return;
       sfx.unlock();
       sfx.play('ui');
       onClick();
@@ -108,7 +121,7 @@ export class UIScene extends Phaser.Scene {
     const text = this.add.text(0, 0, '', this.textStyle(26, 5)).setOrigin(0.5);
     const box = this.add.container(0, 0, [bg, text]);
     box.on('pointerdown', () => {
-      if (state.selecting) return;
+      if (state.selecting || state.shopOpen) return;
       sfx.unlock();
       sfx.play('ui');
       onClick();
@@ -155,6 +168,7 @@ export class UIScene extends Phaser.Scene {
     this.coinText.setStyle({ ...this.textStyle(22, 4.5), color: '#ffe27a' });
     this.coinText.setPosition(m + 38 * u, coinY + 1 * u);
     this.shownCoins = -1; // подпись и плашка перерисуются
+    this.drawShopIcon();
 
     // область, занятая интерфейсом: игра не принимает там касания за управление
     state.uiRects = [
@@ -162,6 +176,8 @@ export class UIScene extends Phaser.Scene {
       { x: 0, y: 0, w: this.barWidth() + 2 * 24 * u + 3 * m, h: m + 52 * u },
       { x: 0, y: coinY - 20 * u, w: 160 * u, h: 40 * u },
     ];
+    this.shopUi = null;
+    this.placeShopButton();
 
     // подсказка внизу по центру
     const touch = isCoarsePointer();
@@ -233,6 +249,79 @@ export class UIScene extends Phaser.Scene {
     });
   }
 
+  /** Кнопка магазина стоит справа от плашки монет и едет вместе с ней, когда число монет растёт. */
+  private placeShopButton(): void {
+    const u = this.u;
+    const bs = 52 * u;
+    const m = 14 * u;
+    const coinY = m + 2 * 24 * u + 12 * u + 16 * u;
+    const plateW = 52 * u + this.coinText.width;
+    const x = m + plateW + 14 * u;
+    const y = coinY - bs / 2 + 4 * u;
+    this.shopBtn.box.setPosition(x + bs / 2, y + bs / 2);
+    this.shopBtn.box.setSize(bs, bs);
+    this.shopBtn.box.setInteractive(new Phaser.Geom.Rectangle(-bs / 2, -bs / 2, bs, bs), Phaser.Geom.Rectangle.Contains);
+    this.drawButton(this.shopBtn.bg, bs);
+    this.shopRect = { x, y, w: bs, h: bs };
+    // зона интерфейса: касание на кнопке не должно поворачивать червя
+    const prev = this.shopUi;
+    this.shopUi = { x: x - 4 * u, y: y - 4 * u, w: bs + 8 * u, h: bs + 8 * u };
+    state.uiRects = [...state.uiRects.filter((r) => r !== prev), this.shopUi];
+  }
+
+  /** Значок магазина улучшений: толстая стрелка вверх («стать сильнее») с золотой монетой у основания. */
+  private drawShopIcon(): void {
+    const g = this.shopBtn.icon;
+    const s = 52 * this.u;
+    const u = this.u;
+    this.icon(g, () => {
+      g.fillStyle(0xffffff, 1).lineStyle(3 * u, INK, 1);
+      g.beginPath()
+        .moveTo(0, -0.3 * s)
+        .lineTo(0.25 * s, -0.02 * s)
+        .lineTo(0.11 * s, -0.02 * s)
+        .lineTo(0.11 * s, 0.2 * s)
+        .lineTo(-0.11 * s, 0.2 * s)
+        .lineTo(-0.11 * s, -0.02 * s)
+        .lineTo(-0.25 * s, -0.02 * s)
+        .closePath()
+        .fillPath()
+        .strokePath();
+      g.fillStyle(0xffd23f, 1).fillCircle(0.17 * s, 0.19 * s, 0.125 * s);
+      g.lineStyle(2.5 * u, INK, 1).strokeCircle(0.17 * s, 0.19 * s, 0.125 * s);
+      g.fillStyle(0xffffff, 0.85).fillCircle(0.135 * s, 0.15 * s, 0.035 * s);
+    });
+  }
+
+  /** Красная точка на кнопке и стрелка-подсказка: можно купить улучшение. */
+  private updateShopHint(time: number): void {
+    const u = this.u;
+    const blocked = state.selecting || state.shopOpen || state.paused;
+    const afford = canAffordAny(save.data.up, state.coins);
+    const r = this.shopRect;
+    this.shopDot.clear();
+    if (afford && !blocked) {
+      const pulse = 1 + 0.12 * Math.sin(time / 180);
+      const cx = r.x + r.w - 5 * u;
+      const cy = r.y + 5 * u;
+      this.shopDot.fillStyle(0xffffff, 1).fillCircle(cx, cy, 12 * u * pulse);
+      this.shopDot.fillStyle(0xe8352a, 1).fillCircle(cx, cy, 9 * u * pulse);
+      this.shopDot.fillStyle(0xffffff, 0.5).fillCircle(cx - 2.5 * u, cy - 2.5 * u, 3 * u);
+    }
+    // пока магазин ни разу не открывали, стрелка показывает на кнопку
+    const showArrow = afford && !blocked && !(save.data.tutorial & TUTORIAL_SHOP_OPENED);
+    this.shopArrow.setVisible(showArrow);
+    if (showArrow) {
+      const bob = Math.sin(time / 170) * 6 * u;
+      this.shopArrow.setScale((34 * u) / 64).setRotation(Math.PI).setPosition(r.x + r.w / 2, r.y + r.h + 22 * u + bob);
+    }
+    // один раз подсказываем словами, когда монет впервые хватает
+    if (afford && !blocked && !(save.data.tutorial & TUTORIAL_SHOP_HINT) && state.toast.left <= 0) {
+      save.patch({ tutorial: save.data.tutorial | TUTORIAL_SHOP_HINT });
+      showToast('tut_shop', 5);
+    }
+  }
+
   private drawSoundIcon(): void {
     const g = this.soundBtn.icon;
     const s = 52 * this.u;
@@ -262,7 +351,7 @@ export class UIScene extends Phaser.Scene {
 
   // ---------- действия ----------
   private togglePause(): void {
-    if (state.selecting) return;
+    if (state.selecting || state.shopOpen) return;
     state.paused = !state.paused;
     platform.gameplay(!state.paused);
     this.overlay.setVisible(state.paused);
@@ -277,7 +366,7 @@ export class UIScene extends Phaser.Scene {
   }
 
   // ---------- шаг ----------
-  override update(_time: number, delta: number): void {
+  override update(time: number, delta: number): void {
     // шкала роста перерисовывается только при изменении
     const u = this.u;
     const p = Math.max(0, Math.min(1, state.growth / state.need));
@@ -301,20 +390,21 @@ export class UIScene extends Phaser.Scene {
         this.tweens.add({ targets: this.coinText, scale: 1, duration: 260, ease: 'Back.easeOut' });
       }
     }
+    this.updateShopHint(time);
     // подсказка: новому игроку висит до первой съеденной добычи, потом гаснет; не мешает окну выбора
     if (save.data.tutorial & TUTORIAL_EAT) this.hintLeft = Math.min(this.hintLeft, 2.5);
-    if (this.hintLeft > 0 && !state.paused && !state.selecting) {
+    if (this.hintLeft > 0 && !state.paused && !state.selecting && !state.shopOpen) {
       this.hintLeft -= delta / 1000;
       this.hint.setAlpha(Math.max(0, Math.min(1, this.hintLeft / 1.5)));
     }
-    this.hint.setVisible(!state.selecting);
+    this.hint.setVisible(!state.selecting && !state.shopOpen);
     // короткое сообщение (выход на поверхность закрыт или открылся, обучение)
     const toast = state.toast;
     if (toast.key && toast.left > 0) {
-      if (!state.paused && !state.selecting) toast.left -= delta / 1000;
+      if (!state.paused && !state.selecting && !state.shopOpen) toast.left -= delta / 1000;
       if (this.toastKey !== toast.key) {
         this.toastKey = toast.key;
-        this.toastText.setText(t(toast.key));
+        this.toastText.setText(t(toast.key, toast.params));
       }
       this.toastText.setAlpha(Math.max(0, Math.min(1, toast.left / 0.6, (toast.total - toast.left) / 0.2)));
     } else if (this.toastText.alpha !== 0) {
@@ -333,6 +423,7 @@ export class UIScene extends Phaser.Scene {
     g.fillStyle(INK, 1).fillRoundedRect(m - 3 * u, y - 18 * u - 3 * u, w + 6 * u, 36 * u + 6 * u, 21 * u);
     g.fillStyle(0x4a2f1f, 1).fillRoundedRect(m, y - 18 * u, w, 36 * u, 18 * u);
     g.fillStyle(0xffffff, 0.14).fillRoundedRect(m + 4 * u, y - 15 * u, w - 8 * u, 11 * u, 6 * u);
+    this.placeShopButton();
   }
 
   private drawBar(p: number, bw: number, u: number): void {

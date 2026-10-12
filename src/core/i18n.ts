@@ -32,6 +32,37 @@ const ru = {
   'wings.3': 'Светлые крылья',
   'wings.4': 'Тёмные крылья',
   'wings.5': 'Крылья золотого дракона',
+  'armor.1': 'Мелкая чешуя',
+  'armor.2': 'Крупная чешуя',
+  'armor.3': 'Чешуя с бугорками',
+  'armor.4': 'Острые рога',
+  'armor.5': 'Драконьи рога',
+  'fins.1': 'Спинной гребешок',
+  'fins.2': 'Высокий гребень',
+  'fins.3': 'Спинной плавник',
+  'fins.4': 'Большой плавник',
+  'fins.5': 'Золотой плавник',
+  'line.jump': 'Прыжок',
+  'line.hp': 'Здоровье',
+  'line.speed': 'Скорость',
+  'eff.jump': 'Высота прыжка +{n}%',
+  'eff.hp': 'Запас здоровья +{n}%',
+  'eff.speed': 'Скорость +{n}%',
+  shop_title: 'Магазин',
+  shop_tab_up: 'Улучшения',
+  shop_tab_ch: 'Испытания',
+  shop_max: 'Максимум',
+  shop_need: 'Не хватает {n}',
+  tut_shop: 'Хватает монет на улучшение! Откройте магазин',
+  ch_eat: 'Съешьте добычу: {n}',
+  ch_beetle: 'Съешьте жуков: {n}',
+  ch_worm: 'Съешьте червячков: {n}',
+  ch_coins: 'Соберите монеты: {n}',
+  ch_gems: 'Найдите самоцветы: {n}',
+  ch_chests: 'Найдите сундуки: {n}',
+  ch_tier: 'Достигните уровня {n}',
+  ch_jump: 'Выпрыгните из земли: {n}',
+  ch_done: 'Испытание выполнено! +{n} монет',
 } as const;
 
 export type TextKey = keyof typeof ru;
@@ -66,6 +97,37 @@ const en: Record<TextKey, string> = {
   'wings.3': 'Light wings',
   'wings.4': 'Dark wings',
   'wings.5': 'Golden dragon wings',
+  'armor.1': 'Small scales',
+  'armor.2': 'Large scales',
+  'armor.3': 'Scales with bumps',
+  'armor.4': 'Sharp horns',
+  'armor.5': 'Dragon horns',
+  'fins.1': 'Dorsal crest',
+  'fins.2': 'Tall crest',
+  'fins.3': 'Dorsal fin',
+  'fins.4': 'Big fin',
+  'fins.5': 'Golden fin',
+  'line.jump': 'Jump',
+  'line.hp': 'Health',
+  'line.speed': 'Speed',
+  'eff.jump': 'Jump height +{n}%',
+  'eff.hp': 'Health +{n}%',
+  'eff.speed': 'Speed +{n}%',
+  shop_title: 'Shop',
+  shop_tab_up: 'Upgrades',
+  shop_tab_ch: 'Challenges',
+  shop_max: 'Maxed',
+  shop_need: 'Need {n} more',
+  tut_shop: 'Enough coins for an upgrade! Open the shop',
+  ch_eat: 'Eat prey: {n}',
+  ch_beetle: 'Eat beetles: {n}',
+  ch_worm: 'Eat worms: {n}',
+  ch_coins: 'Collect coins: {n}',
+  ch_gems: 'Find gems: {n}',
+  ch_chests: 'Find chests: {n}',
+  ch_tier: 'Reach level {n}',
+  ch_jump: 'Leap out of the ground: {n}',
+  ch_done: 'Challenge complete! +{n} coins',
 };
 
 const dict: Record<Lang, Record<TextKey, string>> = { ru, en };
@@ -89,6 +151,9 @@ export function getLang(): Lang {
   return current;
 }
 
-export function t(key: TextKey): string {
-  return dict[current][key];
+/** Текст по ключу; {n}, {name} и другие метки в строке заменяются значениями params. */
+export function t(key: TextKey, params?: Record<string, number | string>): string {
+  let s = dict[current][key];
+  if (params) for (const k of Object.keys(params)) s = s.split(`{${k}}`).join(String(params[k]));
+  return s;
 }

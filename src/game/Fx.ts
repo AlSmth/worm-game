@@ -98,6 +98,21 @@ export class Fx {
     });
   }
 
+  /** Линия скорости: тонкий штрих вдоль движения, остаётся на месте и гаснет (след за быстрым червём). */
+  streak(x: number, y: number, angle: number, S: number, color = 0xffffff): void {
+    const k = (150 * S) / this.frameWidth('fx-streak');
+    const img = this.scene.add.image(x, y, 'fx', 'fx-streak').setDepth(499).setTint(color).setRotation(angle).setScale(k * 0.6, k).setAlpha(0.9);
+    this.scene.tweens.add({
+      targets: img,
+      alpha: 0,
+      scaleX: k * 1.15,
+      scaleY: k * 0.5,
+      duration: 380,
+      ease: 'Quad.easeOut',
+      onComplete: () => img.destroy(),
+    });
+  }
+
   /** Всплывающее число («+5» у монет): поднимается и гаснет. Размер растёт вместе с червём, чтобы читаться на любом отдалении. */
   floatText(x: number, y: number, S: number, text: string, color = '#ffd23f'): void {
     const t = this.scene.add

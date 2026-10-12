@@ -1,4 +1,5 @@
 import type { SkinId } from '../data/skins';
+import type { ChallengeKind } from '../data/challenges';
 
 /** Панель разработчика: только в dev-сборке (в релиз не попадает, п. 1.14: никакой «кухни» на экране). */
 export interface DevApi {
@@ -12,6 +13,8 @@ export interface DevApi {
   world(): { width: number; surfaceTier: number };
   addCoins(n: number): void;
   openSelect(): void;
+  openShop(): void;
+  reportChallenge(kind: ChallengeKind, amount: number): void;
   resetTutorial(): void;
   resetSave(): void;
 }
@@ -27,8 +30,10 @@ export function mountDevPanel(api: DevApi): void {
     '<b>DEV</b> <span id="dv-info" style="color:#9aa0b8"></span>' +
     '<div>Персонаж: ' + btn('A', 'skin:peach') + btn('B', 'skin:salad') + btn('C', 'skin:plum') + '</div>' +
     '<div>Крылья: ' + [0, 1, 2, 3, 4, 5].map((n) => btn(String(n), 'wings:' + n)).join('') + '</div>' +
+    '<div>Броня: ' + [0, 1, 2, 3, 4, 5].map((n) => btn(String(n), 'armor:' + n)).join('') + '</div>' +
+    '<div>Гребень: ' + [0, 1, 2, 3, 4, 5].map((n) => btn(String(n), 'fins:' + n)).join('') + '</div>' +
     '<div>Рост: ' + btn('+10', 'grow:10') + btn('+100', 'grow:100') + btn('тир +1', 'tier:+1') + btn('тир −1', 'tier:-1') + '</div>' +
-    '<div>Монеты: ' + btn('+10', 'coins:10') + btn('+100', 'coins:100') + btn('выбор червя', 'select') + btn('обучение заново', 'tut') + '</div>' +
+    '<div>Монеты: ' + btn('+10', 'coins:10') + btn('+100', 'coins:100') + btn('выбор червя', 'select') + btn('магазин', 'shop') + btn('обучение заново', 'tut') + '</div>' +
     '<div>' + btn('автопилот', 'auto') + btn('сброс сохранения', 'reset') + '</div>';
   let auto = false;
   let tier = 1;
@@ -38,6 +43,9 @@ export function mountDevPanel(api: DevApi): void {
     const [kind, arg] = (b.dataset.id ?? '').split(':');
     if (kind === 'skin') api.setSkin(arg as SkinId);
     else if (kind === 'wings') api.setUpgrade('jump', Number(arg));
+    else if (kind === 'armor') api.setUpgrade('hp', Number(arg));
+    else if (kind === 'fins') api.setUpgrade('speed', Number(arg));
+    else if (kind === 'shop') api.openShop();
     else if (kind === 'grow') api.addGrowth(Number(arg));
     else if (kind === 'coins') api.addCoins(Number(arg));
     else if (kind === 'select') api.openSelect();
@@ -58,6 +66,6 @@ export function mountDevPanel(api: DevApi): void {
   const info = el.querySelector('#dv-info') as HTMLElement;
   window.setInterval(() => {
     const s = api.state();
-    info.textContent = `тир ${s.tier} · ${s.fps} fps · ${s.skin} · крылья ${s.wings} · монет ${s.coins}`;
+    info.textContent = `тир ${s.tier} · ${s.fps} fps · ${s.skin} · кр ${s.wings} бр ${s.armor} гр ${s.fins} · монет ${s.coins}`;
   }, 300);
 }

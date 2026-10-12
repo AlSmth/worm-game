@@ -19,11 +19,13 @@ export const state = {
   paused: false,
   /** Открыт экран выбора персонажа: игра стоит, касания не должны управлять червём и кнопками под ним. */
   selecting: false,
+  /** Открыт магазин: игра стоит, касания не должны управлять червём и кнопками под ним. */
+  shopOpen: false,
   /** Занятые интерфейсом прямоугольники в px холста: игра не принимает там касания за управление червём. */
   uiRects: [] as UiRect[],
   layout: { cssW: 0, cssH: 0, dpr: 1, width: 0, height: 0 } as Layout,
   /** Короткое сообщение игроку сверху по центру: ключ строки и сколько секунд ещё показывать. */
-  toast: { key: null as TextKey | null, left: 0, total: 0 },
+  toast: { key: null as TextKey | null, left: 0, total: 0, params: undefined as Record<string, number | string> | undefined },
 };
 
 export function hitsUi(x: number, y: number): boolean {
@@ -31,7 +33,8 @@ export function hitsUi(x: number, y: number): boolean {
 }
 
 /** Показать сообщение игроку на несколько секунд (текст берётся из словаря, язык подставляет UI). */
-export function showToast(key: TextKey, seconds: number): void {
+export function showToast(key: TextKey, seconds: number, params?: Record<string, number | string>): void {
   state.toast.key = key;
+  state.toast.params = params;
   state.toast.left = state.toast.total = seconds;
 }

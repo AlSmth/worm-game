@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Генератор эффектов и частиц (SVG): звёздочка, точка, кольцо роста, всплеск «ам», облачко пыли, комочек земли,
-блеск монеты, мягкое свечение, стрелка-подсказка.
+блеск монеты, мягкое свечение, стрелка-подсказка, линия скорости.
 
 Запуск из корня проекта:  python tools/gen_fx.py
 
@@ -97,11 +97,20 @@ def fx_arrow():
     return svg(64, defs, art)
 
 
+def fx_streak():
+    """Линия скорости: тонкий штрих, к хвосту (слева) прозрачный. Игра красит его в голубой или золотой."""
+    return ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 24" width="128" height="24">\n'
+            '<defs><linearGradient id="fx-streak-g" x1="0" y1="0" x2="1" y2="0">'
+            '<stop offset="0" stop-color="#FFFFFF" stop-opacity="0"/><stop offset=".55" stop-color="#FFFFFF" stop-opacity=".75"/>'
+            '<stop offset="1" stop-color="#FFFFFF" stop-opacity="1"/></linearGradient></defs>\n'
+            '<path d="M 0 12 Q 40 6 120 7 Q 128 7 128 12 Q 128 17 120 17 Q 40 18 0 12 Z" fill="url(#fx-streak-g)"/>\n</svg>\n')
+
+
 def main():
     items = {
         'fx-star': fx_star(), 'fx-dot': fx_dot(), 'fx-tierup-ring': fx_ring(), 'fx-glow': fx_glow(),
         'fx-eat-pop': fx_eat_pop(), 'fx-dust-poof': fx_dust_poof(), 'fx-dirt-chunk': fx_dirt_chunk(),
-        'fx-coin-sparkle': fx_coin_sparkle(), 'fx-arrow': fx_arrow(),
+        'fx-coin-sparkle': fx_coin_sparkle(), 'fx-arrow': fx_arrow(), 'fx-streak': fx_streak(),
     }
     for name, text in items.items():
         write(OUT_DIR / f'{name}.svg', text)

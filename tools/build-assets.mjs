@@ -31,6 +31,10 @@ const ATLASES = [
   { name: 'props', scale: 1, dir: 'design/zone-1-underground/food' },
   { name: 'treasure', scale: 1, dir: 'design/treasure' },
   { name: 'fx', scale: 1, dir: 'design/effects' },
+  // броня и гребень с плавниками: по атласу на персонажа (цвета пластин и плавников берутся от цвета червя)
+  { name: 'gear-peach', scale: 1, dirs: ['design/upgrades/armor/peach', 'design/upgrades/fins/peach'] },
+  { name: 'gear-salad', scale: 1, dirs: ['design/upgrades/armor/salad', 'design/upgrades/fins/salad'] },
+  { name: 'gear-plum', scale: 1, dirs: ['design/upgrades/armor/plum', 'design/upgrades/fins/plum'] },
 ];
 
 /** Одиночные картинки без обрезки и упаковки (фоны и повторяющиеся плитки): PNG целиком, размер степень двойки. */
@@ -46,6 +50,11 @@ const pot = (n) => 2 ** Math.ceil(Math.log2(Math.max(n, 1)));
 
 function listSvgs(dir) {
   return readdirSync(join(ROOT, dir)).filter((f) => f.endsWith('.svg')).sort();
+}
+
+/** Все SVG атласа: одна папка (dir) или несколько (dirs). */
+function atlasFiles(cfg) {
+  return (cfg.dirs ?? [cfg.dir]).flatMap((d) => listSvgs(d).map((f) => join(ROOT, d, f)));
 }
 
 function newestMtime(paths) {
@@ -106,7 +115,7 @@ function pack(frames) {
 }
 
 function buildAtlas(cfg) {
-  const files = listSvgs(cfg.dir).map((f) => join(ROOT, cfg.dir, f));
+  const files = atlasFiles(cfg);
   const pngPath = join(OUT, `${cfg.name}.png`);
   const jsonPath = join(OUT, `${cfg.name}.json`);
   if (!FORCE && existsSync(pngPath) && existsSync(jsonPath)) {

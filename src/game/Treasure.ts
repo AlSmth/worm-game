@@ -101,6 +101,7 @@ export class TreasureSystem {
     }
     let value = spec.value;
     let tint = 0xffffff;
+    const worth = (v: number) => Math.max(1, Math.round(v * Math.max(1, S)));
     if (spec.kind === 'gem') {
       const total = GEM_TINTS.reduce((a, g) => a + g.weight, 0);
       let g = Math.random() * total;
@@ -108,6 +109,8 @@ export class TreasureSystem {
       tint = pick.tint;
       value = pick.value;
     }
+    // ценность сокровища растёт вместе с миром: чем крупнее червь, тем богаче находки (цены в магазине рассчитаны на это)
+    value = worth(value);
     const k = sizeScale(S);
     const baseScale = spec.look * k;
     const r = scaledRadius(spec, S);

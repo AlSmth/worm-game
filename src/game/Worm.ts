@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import rig from '../../design/worm/rig.json';
+import gear from '../../design/upgrades/gear.json';
 import { skinInfo, type SkinId } from '../data/skins';
 import { JUMP_BONUS, SPEED_BONUS, WINGS_CANVAS, type Upgrades } from '../data/upgrades';
 import { SWIM_SPEED, WORLD_WIDTH } from '../data/world';
@@ -31,6 +32,8 @@ const CEILING = 64;
 
 const DEPTH: Record<string, number> = {
   wingBack: 0,
+  tailFin: 2,
+  hornBack: 4,
   crown: 5,
   out: 10,
   shade: 11,
@@ -40,6 +43,9 @@ const DEPTH: Record<string, number> = {
   maw: 20,
   jawBottom: 21,
   jawTop: 22,
+  fin: 16,
+  plate: 17,
+  head: 18,
   wingFront: 150,
   face: 160,
 };
@@ -52,7 +58,24 @@ interface Node {
   x: number;
   y: number;
   a: number;
+  /** Сторона спины: 1, если червь смотрел вправо, когда этот кусок тела был у головы; −1, если влево. */
+  f: number;
 }
+
+/** Точка на теле на заданном расстоянии от головы: положение, угол пути, сторона спины и радиус тела. */
+interface BodyPoint {
+  x: number;
+  y: number;
+  a: number;
+  f: number;
+  r: number;
+}
+
+/** Расстояния до мест, где сидят детали на спине, считаются по этим числам (design/upgrades/gear.json). */
+const PLATE_INSET = 0.93;
+const FIN_INSET = 0.9;
+/** С какой ступени брони рога закрывают макушку персонажа. */
+const CROWN_HIDDEN_FROM = 4;
 
 function angleDiff(a: number, b: number): number {
   let d = a - b;
@@ -103,7 +126,18 @@ export class Worm {
   private wingBack: Phaser.GameObjects.Image | null = null;
   private wingFront: Phaser.GameObjects.Image | null = null;
   private wingLevel = 0;
-  private trail: Array<{ x: number; y: number }> = [];
+  private armorLevel = 0;
+  private finLevel = 0;
+  private gearAtlas = '';
+  private headGear: Phaser.GameObjects.Image | null = null;
+  private hornBack: Phaser.GameObjects.Image | null = null;
+  private tailFin: Phaser.GameObjects.Image | null = null;
+  private plates: Phaser.GameObjects.Image[] = [];
+  private finSegs: Phaser.GameObjects.Image[] = [];
+  private bodyPoint: BodyPoint = { x: 0, y: 0, a: 0, f: 1, r: 0 };
+  /** Витрина (магазин): крылья всегда раскрыты и слегка машут. */
+  showOff = false;
+  private trail: Array<{ x: number; y: number; f: number }> = [];
   private expr: Expr = 'idle';
   private hintExpr: Expr = 'idle';
   private timedExpr: Expr | null = null;
@@ -136,6 +170,7 @@ export class Worm {
     this.faceImg = img(`face-${this.expr}`, DEPTH.face);
     this.crown = info.crown ? img('crown', DEPTH.crown) : null;
     this.buildWings();
+    this.buildGear();
   }
 
   private destroySprites(): void {
@@ -149,6 +184,30 @@ export class Worm {
     this.wingBack?.destroy();
     this.wingFront?.destroy();
     this.crown = this.wingBack = this.wingFront = null;
+    this.destroyGear();
+  }
+
+  private destroyGear(): void {
+    for (const s of [this.headGear, this.hornBack, this.tailFin]) s?.destroy();
+    this.headGear = this.hornBack = this.tailFin = null;
+    this.plates.forEach((i) => i.destroy());
+    this.finSegs.forEach((i) => i.destroy());
+    this.plates = [];
+    this.finSegs = [];
+  }
+
+  /** Броня и гребень текущих ступеней: детали на голове и хвостовой плавник сразу, пластины и шипы по длине тела в layout. */
+  private buildGear(): void {
+    this.destroyGear();
+    this.gearAtlas = `gear-${this.skin}`;
+    const a = this.armorLevel;
+    const f = this.finLevel;
+    const at = (frame: string, depth: number) => this.scene.add.image(0, 0, this.gearAtlas, frame).setDepth(depth);
+    if (a > 0) {
+      this.headGear = at(`armor-${this.skin}-t${a}-head`, DEPTH.head);
+      if (a >= 3) this.hornBack = at(`armor-${this.skin}-t${a}-horn`, DEPTH.hornBack);
+    }
+    if (f >= 2) this.tailFin = at(`fin-${this.skin}-t${f}-tail`, DEPTH.tailFin);
   }
 
   private buildWings(): void {
@@ -178,6 +237,25 @@ export class Worm {
       this.wingLevel = u.jump;
       this.buildWings();
     }
+    if (u.hp !== this.armorLevel || u.speed !== this.finLevel) {
+      this.armorLevel = u.hp;
+      this.finLevel = u.speed;
+      this.buildGear();
+    }
+  }
+
+  /** Сколько деталей брони и гребня сейчас на черве (для проверок). */
+  gearInfo(): { armor: number; fins: number; plates: number; finSegs: number; head: boolean; hornBack: boolean; tail: boolean; crown: boolean } {
+    return {
+      armor: this.armorLevel,
+      fins: this.finLevel,
+      plates: this.plates.filter((i) => i.visible).length,
+      finSegs: this.finSegs.filter((i) => i.visible).length,
+      head: !!this.headGear,
+      hornBack: !!this.hornBack,
+      tail: !!this.tailFin,
+      crown: !!this.crown?.visible,
+    };
   }
 
   /** Тир с дробной частью: размер и длина растут плавно. */
@@ -197,7 +275,7 @@ export class Worm {
     this.trail = [];
     const step = TRAIL_STEP * this.scale;
     for (let i = 500; i >= 1; i--) {
-      this.trail.push({ x: x - Math.cos(heading) * i * step, y: y - Math.sin(heading) * i * step });
+      this.trail.push({ x: x - Math.cos(heading) * i * step, y: y - Math.sin(heading) * i * step, f: this.facing });
     }
   }
 
@@ -363,7 +441,7 @@ export class Worm {
   private pushTrail(): void {
     const last = this.trail[this.trail.length - 1];
     if (!last || Math.hypot(this.x - last.x, this.y - last.y) >= TRAIL_STEP * this.scale) {
-      this.trail.push({ x: this.x, y: this.y });
+      this.trail.push({ x: this.x, y: this.y, f: this.facing });
       const maxPts = Math.ceil((this.segs * rig.step + 300) / TRAIL_STEP) + 40;
       if (this.trail.length > maxPts) this.trail.splice(0, this.trail.length - maxPts);
     }
@@ -385,27 +463,31 @@ export class Worm {
   /** Узлы тела: count точек на равных расстояниях sp вдоль следа головы (последняя в конце тела total). */
   private computeNodes(count: number, sp: number, total: number): void {
     const nodes = this.nodes;
-    while (nodes.length < count) nodes.push({ x: 0, y: 0, a: 0 });
+    while (nodes.length < count) nodes.push({ x: 0, y: 0, a: 0, f: 1 });
     nodes[0].x = this.x;
     nodes[0].y = this.y;
     nodes[0].a = this.heading;
+    nodes[0].f = this.facing;
     let curX = this.x;
     let curY = this.y;
     let walked = 0;
     let j = 1;
     let lastAngle = this.heading;
+    let lastFace = this.facing;
     for (let k = this.trail.length - 1; k >= 0 && j < count; k--) {
       const p = this.trail[k];
       const segLen = Math.hypot(curX - p.x, curY - p.y);
       if (segLen < 1e-6) continue;
       const ang = Math.atan2(curY - p.y, curX - p.x);
       lastAngle = ang;
+      lastFace = p.f;
       while (j < count && walked + segLen >= Math.min(j * sp, total)) {
         const t = (Math.min(j * sp, total) - walked) / segLen;
         const n = nodes[j];
         n.x = curX + (p.x - curX) * t;
         n.y = curY + (p.y - curY) * t;
         n.a = ang;
+        n.f = p.f;
         j++;
       }
       walked += segLen;
@@ -419,8 +501,26 @@ export class Worm {
       n.x = curX - Math.cos(lastAngle) * rest;
       n.y = curY - Math.sin(lastAngle) * rest;
       n.a = lastAngle;
+      n.f = lastFace;
       j++;
     }
+  }
+
+  /** Точка тела на расстоянии d (px при масштабе 1) от центра головы: плавная, между узлами. */
+  private samplePoint(d: number, sp: number, count: number): BodyPoint {
+    const j = Math.max(0, d / sp);
+    const i0 = Math.min(count - 1, Math.floor(j));
+    const i1 = Math.min(count - 1, i0 + 1);
+    const t = Math.min(1, j - i0);
+    const n0 = this.nodes[i0];
+    const n1 = this.nodes[i1];
+    const p = this.bodyPoint;
+    p.x = n0.x + (n1.x - n0.x) * t;
+    p.y = n0.y + (n1.y - n0.y) * t;
+    p.a = n0.a + angleDiff(n1.a, n0.a) * t;
+    p.f = n0.f;
+    p.r = this.radii[i0] + (this.radii[i1] - this.radii[i0]) * t;
+    return p;
   }
 
   private layout(dt: number, now: number): void {
@@ -485,6 +585,7 @@ export class Worm {
     this.jawBottom.setPosition(pb.x, pb.y).setRotation(ha - th * face).setScale(sc).setFlipY(flip);
     this.jawTop.setPosition(pt.x, pt.y).setRotation(ha + th * face).setScale(sc).setFlipY(flip);
     this.faceImg.setPosition(h.x, h.y).setRotation(ha).setScale(sc).setFlipY(flip);
+    this.layoutGear(count, sp, L, S, { x0: vx0, y0: vy0, w: vw, h: vh }, h.x, h.y, ha, flip);
 
     // крылья на спине в wingDist от головы
     if (this.wingBack && this.wingFront) {
@@ -498,10 +599,10 @@ export class Worm {
       const ax = n.x + ox * cn - oy * sn;
       const ay = n.y + ox * sn + oy * cn;
       const k = S / atlasScale('wings');
-      this.flapPhase += dt * (this.inAir ? 16 : 6);
-      const amp = this.inAir ? 0.38 : 0.14;
+      this.flapPhase += dt * (this.inAir ? 16 : this.showOff ? 9 : 6);
+      const amp = this.inAir || this.showOff ? 0.38 : 0.14;
       // под землёй крылья прижаты к спине и меньше, в воздухе раскрываются
-      this.wingOpen += ((this.inAir ? 1 : 0) - this.wingOpen) * Math.min(1, 7 * dt);
+      this.wingOpen += ((this.inAir || this.showOff ? 1 : 0) - this.wingOpen) * Math.min(1, 7 * dt);
       const fold = 1 - this.wingOpen;
       const foldRot = -0.85 * fold * nFace;
       const kk = k * (1 - 0.4 * fold);
@@ -513,6 +614,72 @@ export class Worm {
       this.wingBack?.setVisible(false);
       this.wingFront?.setVisible(false);
     }
+  }
+
+  /** Броня и гребень: пластины и шипы вдоль спины, рога и чешуя на голове, хвостовой плавник. Куски вне экрана не рисуем. */
+  private layoutGear(
+    count: number,
+    sp: number,
+    L: number,
+    S: number,
+    view: { x0: number; y0: number; w: number; h: number },
+    hx: number,
+    hy: number,
+    ha: number,
+    flip: boolean,
+  ): void {
+    this.crown?.setVisible(this.armorLevel < CROWN_HIDDEN_FROM);
+    if (!this.gearAtlas) return;
+    const k = S / atlasScale(this.gearAtlas);
+    this.headGear?.setPosition(hx, hy).setRotation(ha).setScale(k).setFlipY(flip);
+    this.hornBack?.setPosition(hx, hy).setRotation(ha).setScale(k).setFlipY(flip);
+    const pad = 160 * S;
+    const seen = (x: number, y: number) => x > view.x0 - pad && x < view.x0 + view.w + pad && y > view.y0 - pad && y < view.y0 + view.h + pad;
+    const at = (pool: Phaser.GameObjects.Image[], n: number, frame: string, depth: number) => {
+      while (pool.length < n) {
+        const i = pool.length;
+        // чем ближе к голове, тем выше слой: передняя пластина лежит поверх задней
+        pool.push(this.scene.add.image(0, 0, this.gearAtlas, frame).setDepth(depth + (1000 - i) * 0.0001));
+      }
+      while (pool.length > n) pool.pop()?.destroy();
+    };
+    const place = (img: Phaser.GameObjects.Image, d: number, inset: number) => {
+      const b = this.samplePoint(d, sp, count);
+      const out = b.r * inset * S;
+      const x = b.x + Math.sin(b.a) * b.f * out;
+      const y = b.y - Math.cos(b.a) * b.f * out;
+      const vis = seen(x, y);
+      if (img.visible !== vis) img.setVisible(vis);
+      if (vis) img.setPosition(x, y).setRotation(b.a).setScale(k * (b.r / rig.bodyRadius)).setFlipY(b.f < 0);
+    };
+
+    if (this.armorLevel > 0) {
+      const A = gear.armor[this.armorLevel - 1];
+      const end = Math.min(L - 10, gear.armorEnd * L);
+      const n = end > gear.armorStart ? Math.floor((end - gear.armorStart) / A.pitch) + 1 : 0;
+      at(this.plates, n, `armor-${this.skin}-t${this.armorLevel}-plate`, DEPTH.plate);
+      for (let i = 0; i < n; i++) place(this.plates[i], gear.armorStart + i * A.pitch, PLATE_INSET);
+    } else if (this.plates.length) at(this.plates, 0, '', 0);
+
+    if (this.finLevel > 0) {
+      const F = gear.fins[this.finLevel - 1];
+      const start = gear.finStart * L;
+      const end = L - 12;
+      const n = end > start ? Math.floor((end - start) / F.pitch) + 1 : 0;
+      at(this.finSegs, n, `fin-${this.skin}-t${this.finLevel}-seg`, DEPTH.fin);
+      for (let i = 0; i < n; i++) place(this.finSegs[i], start + i * F.pitch, FIN_INSET);
+    } else if (this.finSegs.length) at(this.finSegs, 0, '', 0);
+
+    if (this.tailFin) {
+      const n = this.nodes[count - 1];
+      this.tailFin.setPosition(n.x, n.y).setRotation(n.a).setScale(k).setFlipY(n.f < 0);
+    }
+  }
+
+  /** Конец хвоста в мире (для следа скорости). */
+  tailPoint(): { x: number; y: number; a: number } {
+    const n = this.nodes[Math.max(0, Math.min(this.nodes.length - 1, Math.ceil((this.segs * rig.step) / rig.spacing)))] ?? this.nodes[0];
+    return { x: n?.x ?? this.x, y: n?.y ?? this.y, a: n?.a ?? this.heading };
   }
 
   private updateExpression(now: number): void {

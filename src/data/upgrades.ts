@@ -1,21 +1,64 @@
 import wingsData from '../../design/upgrades/wings/wings.json';
+import type { TextKey } from '../core/i18n';
 
-/** Три линии улучшений по 5 ступеней (концепт, раздел 9). Ступень 0 — червь без деталей. */
+/**
+ * Три линии улучшений по 5 ступеней (концепт, раздел 9). Ступень 0 — червь без деталей.
+ * Прыжок даёт крылья, здоровье даёт броню (чешуя превращается в рога), скорость даёт гребень и плавники.
+ * Все числа здесь, чтобы балансировать без правки кода.
+ */
 export const MAX_UPGRADE = 5;
+
+export type LineId = 'jump' | 'hp' | 'speed';
+
+/** Порядок линий в магазине. */
+export const LINES: readonly LineId[] = ['jump', 'hp', 'speed'];
 
 export interface Upgrades {
   jump: number; // крылья
   hp: number; // броня
-  speed: number; // чешуя
+  speed: number; // гребень и плавники
 }
 
 export const NO_UPGRADES: Upgrades = { jump: 0, hp: 0, speed: 0 };
 
-/** Прибавка высоты прыжка по ступеням (доля от базовой). Числа предварительные, настроим на Э4. */
+/** Цена покупки ступени 1…5 в монетах (индекс = ступень − 1). Растёт примерно в 2,4 раза за ступень (концепт, раздел 8). */
+export const PRICES = [25, 60, 150, 350, 800];
+
+/** Прибавка высоты прыжка по ступеням (доля от базовой). */
 export const JUMP_BONUS = [0, 0.2, 0.4, 0.65, 0.95, 1.35];
 
 /** Прибавка скорости по ступеням (доля от базовой). */
 export const SPEED_BONUS = [0, 0.08, 0.16, 0.25, 0.35, 0.5];
+
+/** Прибавка запаса здоровья по ступеням (доля от базового). Здоровье начнёт работать с опасностями зоны 2 (Э5). */
+export const HP_BONUS = [0, 0.2, 0.45, 0.75, 1.1, 1.6];
+
+const BONUS: Record<LineId, number[]> = { jump: JUMP_BONUS, hp: HP_BONUS, speed: SPEED_BONUS };
+
+/** Прибавка линии на ступени level в процентах для показа игроку. */
+export function bonusPercent(line: LineId, level: number): number {
+  return Math.round((BONUS[line][clampLevel(level)] ?? 0) * 100);
+}
+
+/** Цена следующей ступени, если червь сейчас на ступени level; null, если уже максимум. */
+export function priceFor(level: number): number | null {
+  const l = clampLevel(level);
+  return l >= MAX_UPGRADE ? null : PRICES[l];
+}
+
+/** Ключ названия ступени (level от 1 до 5) в словаре: «крылья», «броня» или «гребень». */
+export function levelNameKey(line: LineId, level: number): TextKey {
+  const p = line === 'jump' ? 'wings' : line === 'hp' ? 'armor' : 'fins';
+  return `${p}.${Math.max(1, Math.min(MAX_UPGRADE, level))}` as TextKey;
+}
+
+/** Можно ли купить хоть одно улучшение за имеющиеся монеты. */
+export function canAffordAny(up: Upgrades, coins: number): boolean {
+  return LINES.some((l) => {
+    const p = priceFor(up[l]);
+    return p !== null && coins >= p;
+  });
+}
 
 export const WINGS_CANVAS: number = wingsData.canvas;
 /** Длина крыла по ступеням (px при масштабе 1:1), индекс = ступень. */

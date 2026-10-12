@@ -144,6 +144,19 @@ def run_with_sdk(root, shots):
             check('с SDK: все файлы найдены по относительным путям (нет 404 при вложенном пути)', not bad, str(bad))
             check('с SDK: в консоли нет ошибок и предупреждений', not [c for c in b.console if c[0] in ('error', 'exception', 'warning', 'warn')
                                                                        and 'favicon.ico' not in c[1]], str(b.console[:5]))
+            # магазин в собранной игре: клавиша B открывает, gameplay останавливается; Escape закрывает, gameplay снова запускается
+            n0 = len(b.eval('window.__sdkLog'))
+            b.key('KeyB')
+            time.sleep(0.9)
+            opened = [e for e in b.eval('window.__sdkLog')[n0:] if e != 'setData']
+            check('с SDK: магазин открывается клавишей B, gameplay останавливается (stop)', opened == ['stop'], str(opened))
+            b.screenshot(shots / 'p-with-sdk-shop.png')
+            b.key('Escape')
+            time.sleep(0.9)
+            closed = [e for e in b.eval('window.__sdkLog')[n0:] if e != 'setData']
+            check('с SDK: после закрытия магазина gameplay запускается снова (start), пауза не включилась', closed == ['stop', 'start'], str(closed))
+            check('с SDK: после магазина в консоли нет ошибок и предупреждений', not [c for c in b.console if c[0] in ('error', 'exception', 'warning', 'warn')
+                                                                                      and 'favicon.ico' not in c[1]], str(b.console[:5]))
             # перезагрузка (F5) не ломает запуск
             b.open(site.url)
             b.wait_for("window.__sdkLog && window.__sdkLog.indexOf('ready') >= 0", 40)

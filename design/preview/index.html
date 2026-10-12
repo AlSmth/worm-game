@@ -125,8 +125,8 @@
 <body>
 <div class="wrap">
   <header>
-    <h1>Червь, крылья и добыча</h1>
-    <p>Червь: гладкая трубка без соединений и две большие челюсти. <b>Размер челюсти определяет, какую добычу он может съесть.</b> Ползунками можно вырастить червя, раскрыть челюсти и проверить крылья: у всех трёх персонажей они совпадают. Справа от челюстей стоит жук (добыча зоны 1) для сравнения масштаба.</p>
+    <h1>Червь, улучшения и добыча</h1>
+    <p>Червь: гладкая трубка без соединений и две большие челюсти. <b>Размер челюсти определяет, какую добычу он может съесть.</b> Ползунками можно вырастить червя, раскрыть челюсти и надеть крылья, броню и гребень: детали подходят всем трём персонажам, цвет брони и плавников берётся от цвета червя. Справа от челюстей стоит жук (добыча зоны 1) для сравнения масштаба.</p>
   </header>
 
   <div class="toolbar" id="toolbar">
@@ -135,6 +135,8 @@
     <label>Челюсти <input type="range" id="jaw" min="0" max="100" step="1" value="53"><span class="val" id="jawV">53</span></label>
     <span class="seg" id="exprs"></span>
     <span class="seg" id="wingsSeg"></span>
+    <span class="seg" id="armorSeg"></span>
+    <span class="seg" id="finsSeg"></span>
     <label><input type="checkbox" id="wave" checked> волна</label>
     <label><input type="checkbox" id="prey" checked> добыча</label>
     <label><input type="checkbox" id="fit" checked> вписывать в экран</label>
@@ -155,8 +157,20 @@
 
   <section class="prog">
     <h3>Прокачка прыжка: крылья</h3>
-    <p>По умолчанию у червя крыльев нет. Первое улучшение прыжка открывает крылья, каждое следующее делает их больше и круче: жук, птица, светлые, тёмные, золотой дракон. Показан выбранный персонаж. Броня (чешуя, затем рога) и гребень за скорость появятся на этапе 4.</p>
+    <p>По умолчанию у червя крыльев нет. Первое улучшение прыжка открывает крылья, каждое следующее делает их больше и круче: жук, птица, светлые, тёмные, золотой дракон. Показан выбранный персонаж.</p>
     <div class="progrow" id="prog"></div>
+  </section>
+
+  <section class="prog">
+    <h3>Прокачка здоровья: броня</h3>
+    <p>Чешуя превращается в рога: мелкая чешуя, крупная чешуя, чешуя с бугорками, острые рога, драконьи рога (золотые). Пластины сидят на спине передней половины тела, чешуя и рога на голове. Макушка (росток, гребень) прячется под рогами с 4-й ступени. Цвет чешуи берётся от цвета выбранного червя. Здоровье начнёт работать с опасностями зоны 2.</p>
+    <div class="progrow" id="progArmor"></div>
+  </section>
+
+  <section class="prog">
+    <h3>Прокачка скорости: гребень и плавники</h3>
+    <p>Спинной гребешок, высокий гребень с хвостовым плавником, спинной плавник с перепонкой, большой плавник с хвостовым веером и линиями скорости, золотой светящийся плавник с искрами. Шипы идут от середины тела к хвосту. Линии скорости и искры за хвостом рисует игра при быстром ходе (в превью их нет).</p>
+    <div class="progrow" id="progFins"></div>
   </section>
 
   <section class="prey">
@@ -197,20 +211,21 @@
 
 <script src="worm-geometry.js"></script>
 <script src="upgrades-geometry.js"></script>
+<script src="gear-geometry.js"></script>
 <script>
 (function () {
   'use strict';
-  var G = window.WORM_GEOM, VARS = window.WORM_VARIANTS, WT = window.WING_TIERS || [], WC = window.WING_CANVAS || 768;
+  var G = window.WORM_GEOM, VARS = window.WORM_VARIANTS, WT = window.WING_TIERS || [], WC = window.WING_CANVAS || 768, GR = window.GEAR || null;
   var BUST = Date.now();
   var EXPRS = [['idle', 'Спокойный', 0.53], ['open', 'Бросок', 1], ['chomp', 'Жуёт', 0], ['hurt', 'Оглушён', 0.1], ['happy', 'Рад', 0.8]];
   var PREY = ['z1-beetle-a', 'z1-beetle-b', 'z1-worm-a', 'z1-worm-b'];
   var Z1_BG = ['bg-z1-far', 'bg-z1-mid', 'bg-z1-near', 'bg-z1-edge', 'bg-z1-clouds'];
   var Z1_TREASURE = ['treasure-coin', 'treasure-gem', 'treasure-chest-small', 'treasure-chest-big'];
-  var Z1_FX = ['fx-star', 'fx-dot', 'fx-tierup-ring', 'fx-glow', 'fx-eat-pop', 'fx-dust-poof', 'fx-dirt-chunk', 'fx-coin-sparkle', 'fx-arrow'];
+  var Z1_FX = ['fx-star', 'fx-dot', 'fx-tierup-ring', 'fx-glow', 'fx-eat-pop', 'fx-dust-poof', 'fx-dirt-chunk', 'fx-coin-sparkle', 'fx-arrow', 'fx-streak'];
   var GEMS = [['рубин', '#ff6b7d'], ['изумруд', '#57e08a'], ['сапфир', '#58a6ff'], ['аметист', '#c58bff']];
   var FAR_SCALE = 0.86;
   var st = { segs: 8, thick: 1, jaw: 0.53, expr: 'idle', wave: true, prey: true, fit: true, bg: 'ground',
-             wings: 0, anchors: false, flap: true, folded: false, pick: null };
+             wings: 0, armor: 0, fins: 0, anchors: false, flap: true, folded: false, pick: null };
   var IMG = {};
   var T = 0;
 
@@ -218,6 +233,7 @@
   function byId(id) { return VARS.filter(function (v) { return v.id === id; })[0]; }
   function wurl(id, name) { return '../worm/' + id + '/worm-' + id + '-' + name + '.svg?v=' + BUST; }
   function uurl(name) { return '../upgrades/wings/' + name + '.svg?v=' + BUST; }
+  function gurl(kind, id, name) { return '../upgrades/' + kind + '/' + id + '/' + name + '.svg?v=' + BUST; }
   function purl(name) { return '../zone-1-underground/food/' + name + '.svg?v=' + BUST; }
   function zurl(name) { return '../zone-1-underground/background/' + name + '.svg?v=' + BUST; }
   function turl(name) { return '../treasure/' + name + '.svg?v=' + BUST; }
@@ -235,6 +251,16 @@
         .concat(v.crown ? ['crown'] : []).forEach(function (n) { list.push([v.id + '/' + n, wurl(v.id, n)]); });
     });
     WT.forEach(function (t) { ['back', 'front'].forEach(function (l) { list.push(['wing' + t.tier + l, uurl('wings-t' + t.tier + '-' + l)]); }); });
+    if (GR) {
+      VARS.forEach(function (v) {
+        GR.armor.forEach(function (a) {
+          ['plate', 'head'].concat(a.tier >= 3 ? ['horn'] : []).forEach(function (n) { list.push([v.id + '/armor' + a.tier + n, gurl('armor', v.id, 'armor-' + v.id + '-t' + a.tier + '-' + n)]); });
+        });
+        GR.fins.forEach(function (f) {
+          ['seg'].concat(f.tail ? ['tail'] : []).forEach(function (n) { list.push([v.id + '/fin' + f.tier + n, gurl('fins', v.id, 'fin-' + v.id + '-t' + f.tier + '-' + n)]); });
+        });
+      });
+    }
     PREY.forEach(function (n) { list.push([n, purl(n)]); });
     Z1_BG.forEach(function (n) { list.push([n, zurl(n)]); });
     Z1_TREASURE.forEach(function (n) { list.push([n, turl(n)]); });
@@ -310,7 +336,18 @@
     var kk = 1 - 0.4 * fold, foldRot = -0.85 * fold;
     var offF = amp * (Math.sin(ph) * 0.5 - 0.1) + foldRot, offB = amp * (Math.sin(ph - 0.7) * 0.5 - 0.1) + foldRot;
     if (o.wings) { drawRot(ctx, IMG['wing' + o.wings + 'back'], WC * kk, wx, wy, wp.a + offB, false); }
-    if (v.crown) { drawRot(ctx, img('crown'), G.canvas, head.x, head.y, ha, false); }
+    // броня и гребень (design/upgrades/gear.json): те же формулы, что в игре, src/game/Worm.ts
+    var AR = o.armor && GR ? GR.armor[o.armor - 1] : null, FN = o.fins && GR ? GR.fins[o.fins - 1] : null;
+    var gimg = function (n) { return IMG[v.id + '/' + n]; };
+    var bodyPoint = function (dd) { var q = path.at(dd); return { x: q.x, y: q.y, a: q.a, r: radius(Math.min(dd, Lb), Lb) }; };
+    var gsprite = function (im, size, q, inset) {
+      if (!im || !im.naturalWidth) { return; }
+      var out = q.r * inset;
+      drawRot(ctx, im, size * q.r / G.bodyRadius, q.x + Math.sin(q.a) * out, q.y - Math.cos(q.a) * out, q.a, false);
+    };
+    if (FN && FN.tail) { var tp = path.at(Lb); drawRot(ctx, gimg('fin' + o.fins + 'tail'), GR.tailCanvas, tp.x, tp.y, tp.a, false); }
+    if (AR && o.armor >= 3) { drawRot(ctx, gimg('armor' + o.armor + 'horn'), GR.headCanvas, head.x, head.y, ha, false); }
+    if (v.crown && !(o.armor >= 4)) { drawRot(ctx, img('crown'), G.canvas, head.x, head.y, ha, false); }
 
     // тело: три прохода (контур, заливка, блик) одинаковыми кругами, поэтому швов нет
     var pass = function (name, fn) {
@@ -322,6 +359,18 @@
       pass('stamp-' + n, n === 'out' ? function (rr) { return (rr + G.outline) / (G.bodyRadius + G.outline); }
                                      : function (rr) { return rr / G.bodyRadius; });
     });
+
+    var gi, gd, gl = [];
+    if (FN) {
+      for (gd = GR.finStart * Lb; gd <= Lb - 12; gd += FN.pitch) { gl.push(gd); }
+      for (gi = gl.length - 1; gi >= 0; gi--) { gsprite(gimg('fin' + o.fins + 'seg'), GR.segCanvas, bodyPoint(gl[gi]), 0.9); }
+    }
+    if (AR) {
+      gl = [];
+      for (gd = GR.armorStart; gd <= Math.min(Lb - 10, GR.armorEnd * Lb); gd += AR.pitch) { gl.push(gd); }
+      for (gi = gl.length - 1; gi >= 0; gi--) { gsprite(gimg('armor' + o.armor + 'plate'), GR.plateCanvas, bodyPoint(gl[gi]), 0.93); }
+      drawRot(ctx, gimg('armor' + o.armor + 'head'), GR.headCanvas, head.x, head.y, ha, false);
+    }
 
     if (o.wings) { drawRot(ctx, IMG['wing' + o.wings + 'front'], WC * kk, wx, wy, wp.a + offF, false); }
 
@@ -351,8 +400,9 @@
     // габариты для вписывания
     var wl = 0;
     if (o.wings) { wl = (WT.filter(function (x) { return x.tier === o.wings; })[0] || { L: 0 }).L; }
-    return { minX: -(Lb + G.tailRadius + 10) - (o.wave ? 0 : 0), maxX: 120 + (o.prey ? 190 : 0),
-             minY: Math.min(-70, o.wings ? wy - wl * 1.25 : -70), maxY: 80 + (o.wave ? 30 : 0), wave: o.wave ? 26 : 0 };
+    var gearUp = Math.max(AR ? (o.armor >= 4 ? 150 : 70) : 0, FN ? 60 + FN.h : 0);
+    return { minX: -(Lb + G.tailRadius + 10) - (FN && FN.tail ? FN.tail : 0), maxX: 120 + (o.prey ? 190 : 0),
+             minY: Math.min(-70, o.wings ? wy - wl * 1.25 : -70, -gearUp), maxY: 80 + (o.wave ? 30 : 0), wave: o.wave ? 26 : 0 };
   }
 
   // Холст под размер элемента с учётом плотности пикселей
@@ -389,7 +439,7 @@
   }
 
   function opts(extra) {
-    var o = { segs: st.segs, wave: st.wave, jaw: st.jaw, expr: st.expr, wings: st.wings, folded: st.folded,
+    var o = { segs: st.segs, wave: st.wave, jaw: st.jaw, expr: st.expr, wings: st.wings, armor: st.armor, fins: st.fins, folded: st.folded,
               flap: st.flap, anchors: st.anchors, prey: st.prey, t: T };
     for (var k in extra) { o[k] = extra[k]; }
     return o;
@@ -417,6 +467,8 @@
     if (q.has('expr')) { st.expr = q.get('expr'); }
     if (q.has('bg')) { st.bg = q.get('bg'); }
     if (q.has('wings')) { st.wings = +q.get('wings'); }
+    if (q.has('armor')) { st.armor = +q.get('armor'); }
+    if (q.has('fins')) { st.fins = +q.get('fins'); }
     ['wave', 'prey', 'fit', 'anchors', 'flap', 'folded'].forEach(function (k) {
       if (q.has(k)) { st[k] = q.get(k) !== '0'; $(k).checked = st[k]; }
     });
@@ -441,14 +493,16 @@
       var f = paint(stage, v, opts({}), { fit: st.fit, thick: st.thick });
       card.querySelector('.info').textContent = 'Длина тела: ' + st.segs + ' звеньев' +
         (st.wings ? ' · ' + wingName(st.wings) : ' · крыльев нет (по умолчанию)') +
+        (st.armor && GR ? ' · броня ' + st.armor + ': ' + GR.armor[st.armor - 1].name : '') +
+        (st.fins && GR ? ' · гребень ' + st.fins + ': ' + GR.fins[st.fins - 1].name : '') +
         (f < 0.995 ? ' · вписано в экран, масштаб ' + Math.round(f * 100) + '%' : '');
       Array.prototype.forEach.call(card.querySelectorAll('.strip canvas'), function (cv) {
         var e = EXPRS.filter(function (x) { return x[0] === cv.dataset.e; })[0];
-        paint(cv, v, opts({ segs: 0, wave: false, expr: e[0], jaw: e[2], wings: 0, prey: false, anchors: false }), { force: 0.78, headOnly: true });
+        paint(cv, v, opts({ segs: 0, wave: false, expr: e[0], jaw: e[2], wings: 0, armor: 0, fins: 0, prey: false, anchors: false }), { force: 0.78, headOnly: true });
       });
       Array.prototype.forEach.call(card.querySelectorAll('.mini .sz canvas'), function (cv) {
         var s = +cv.dataset.s;
-        paint(cv, v, opts({ segs: 0, wave: false, expr: 'idle', jaw: 0.53, wings: 0, prey: false, anchors: false }), { force: s / 190, headOnly: true });
+        paint(cv, v, opts({ segs: 0, wave: false, expr: 'idle', jaw: 0.53, wings: 0, armor: 0, fins: 0, prey: false, anchors: false }), { force: s / 190, headOnly: true });
       });
       paint(card.querySelector('canvas.tiny'), v, opts({ segs: 8, wave: false, expr: 'idle', jaw: 0.53, prey: false, anchors: false }), { force: 0.3 });
     });
@@ -463,8 +517,10 @@
     });
   }
 
-  function renderProg() {
-    var v = byId(st.pick || 'plum'), host = $('prog');
+  // ряд из шести кадров 0..5: линия улучшений (крылья, броня, гребень), показан выбранный персонаж
+  function renderLine(hostId, key, zero, nameOf) {
+    var v = byId(st.pick || 'plum'), host = $(hostId);
+    if (!host) { return; }
     if (!host.children.length) {
       var cells = '';
       for (var t = 0; t <= 5; t++) {
@@ -474,12 +530,21 @@
       host.innerHTML = cells;
     }
     Array.prototype.forEach.call(host.children, function (cell, t) {
-      cell.querySelector('.cap span:last-child').textContent = t ? wingName(t).replace(/^крылья \d: /, '') : 'без крыльев (по умолчанию)';
+      cell.querySelector('.cap span:last-child').textContent = t ? nameOf(t) : zero;
       var cv = cell.querySelector('canvas');
       cv.className = 'mstage ' + st.bg;
-      paint(cv, v, opts({ segs: 7, wave: false, expr: 'idle', jaw: 0.53, wings: t, prey: false, anchors: false }),
-            { force: 0.4 });
+      var extra = { segs: 7, wave: false, expr: 'idle', jaw: 0.53, wings: 0, armor: 0, fins: 0, prey: false, anchors: false };
+      extra[key] = t;
+      paint(cv, v, opts(extra), { force: 0.4 });
     });
+  }
+  function renderProg() {
+    renderLine('prog', 'wings', 'без крыльев (по умолчанию)', function (t) { return wingName(t).replace(/^крылья \d: /, ''); });
+  }
+  function renderGearRows() {
+    if (!GR) { return; }
+    renderLine('progArmor', 'armor', 'без брони (по умолчанию)', function (t) { return GR.armor[t - 1].name; });
+    renderLine('progFins', 'fins', 'без гребня (по умолчанию)', function (t) { return GR.fins[t - 1].name; });
   }
 
   function renderPick() {
@@ -498,7 +563,7 @@
   function paintPick() {
     Array.prototype.forEach.call($('pick').querySelectorAll('canvas'), function (cv) {
       var on = cv.dataset.on === '1', v = byId(cv.dataset.v);
-      paint(cv, v, opts({ segs: 0, wave: false, expr: on ? 'happy' : 'idle', jaw: on ? 0.8 : 0.53, wings: 0, prey: false, anchors: false }),
+      paint(cv, v, opts({ segs: 0, wave: false, expr: on ? 'happy' : 'idle', jaw: on ? 0.8 : 0.53, wings: 0, armor: 0, fins: 0, prey: false, anchors: false }),
             { force: 1.5, headOnly: true });
     });
   }
@@ -593,7 +658,7 @@
     // червь
     var v = byId(st.pick || 'plum');
     ctx.save(); ctx.translate(Math.min(W * 0.62, W - 150), y0 + 150); ctx.scale(0.8, 0.8);
-    drawWorm(ctx, v, opts({ segs: 6, wave: true, expr: 'open', jaw: 1, wings: 0, prey: false, anchors: false, t: T }));
+    drawWorm(ctx, v, opts({ segs: 6, wave: true, expr: 'open', jaw: 1, wings: 0, armor: 0, fins: 0, prey: false, anchors: false, t: T }));
     ctx.restore();
     // подписи слоёв
     ctx.fillStyle = 'rgba(255,255,255,.85)'; ctx.font = '12px system-ui';
@@ -641,16 +706,22 @@
     }
   }
 
-  function renderAll() { renderCards(); renderProg(); paintPick(); renderPrey(); renderZone1(); renderZone1Parts(); }
+  function renderAll() { renderCards(); renderProg(); renderGearRows(); paintPick(); renderPrey(); renderZone1(); renderZone1Parts(); }
 
   // ---------- элементы управления ----------
   $('exprs').innerHTML = EXPRS.map(function (e) { return '<button data-e="' + e[0] + '"' + (e[0] === st.expr ? ' class="on"' : '') + '>' + e[1] + '</button>'; }).join('');
   $('wingsSeg').innerHTML = '<button data-w="0">Без крыльев</button>' + WT.map(function (t) {
     return '<button data-w="' + t.tier + '" title="' + t.name + '">Крылья ' + t.tier + '</button>';
   }).join('');
+  if (GR) {
+    $('armorSeg').innerHTML = '<button data-a="0">Без брони</button>' + GR.armor.map(function (a) { return '<button data-a="' + a.tier + '" title="' + a.name + '">Броня ' + a.tier + '</button>'; }).join('');
+    $('finsSeg').innerHTML = '<button data-f="0">Без гребня</button>' + GR.fins.map(function (f) { return '<button data-f="' + f.tier + '" title="' + f.name + '">Гребень ' + f.tier + '</button>'; }).join('');
+  }
   function mark(seg, attr, val) { Array.prototype.forEach.call(seg.children, function (c) { c.classList.toggle('on', String(c.dataset[attr]) === String(val)); }); }
   mark($('bgs'), 'bg', st.bg);
   mark($('wingsSeg'), 'w', st.wings);
+  mark($('armorSeg'), 'a', st.armor);
+  mark($('finsSeg'), 'f', st.fins);
 
   function wire(seg, attr, key, conv, after) {
     seg.addEventListener('click', function (ev) {
@@ -667,6 +738,8 @@
   });
   wire($('bgs'), 'bg', 'bg');
   wire($('wingsSeg'), 'w', 'wings', Number);
+  wire($('armorSeg'), 'a', 'armor', Number);
+  wire($('finsSeg'), 'f', 'fins', Number);
   $('segs').addEventListener('input', function () { st.segs = +this.value; $('segsV').textContent = st.segs; renderCards(); });
   $('thick').addEventListener('input', function () { st.thick = +this.value; $('thickV').textContent = st.thick.toFixed(1); renderCards(); });
   $('jaw').addEventListener('input', function () { st.jaw = +this.value / 100; $('jawV').textContent = this.value; renderCards(); });
@@ -704,7 +777,7 @@
     var dt = Math.min(0.1, (ts - last) / 1000 || 0); last = ts; T += dt; acc += dt;
     if (acc > 1 / 30) {
       acc = 0;
-      if (st.wings && st.flap) { renderStages(); }
+      if ((st.wings || st.armor || st.fins) && st.flap) { renderStages(); }
       if (st.flap) { renderProg(); }
       tickPrey(1 / 30);
       renderZone1(); renderZone1Parts();
