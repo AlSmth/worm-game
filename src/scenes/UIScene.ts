@@ -7,11 +7,13 @@ import { t, type TextKey } from '../core/i18n';
 import { platform } from '../platform/platform';
 import { save, TUTORIAL_EAT, TUTORIAL_SHOP_HINT, TUTORIAL_SHOP_OPENED } from '../platform/save';
 import { canAffordAny } from '../data/upgrades';
+import { SURFACE_TIER } from '../data/world';
 
 const FONT = "'Trebuchet MS', 'Segoe UI', Verdana, Arial, sans-serif";
 const INK = 0x2b1b17;
 const ORANGE = 0xffb020;
 const BLUE = 0x4d8dff;
+const GREEN = 0x6bbf3a;
 /** Для вернувшегося игрока подсказка показывается коротко, для нового держится до первой съеденной добычи. */
 const HINT_RETURNING = 4;
 const HINT_NEW = 1e9;
@@ -44,7 +46,11 @@ export class UIScene extends Phaser.Scene {
   private overlayTitle!: Phaser.GameObjects.Text;
   private resumeBtn!: LabelBtn;
   private changeBtn!: LabelBtn;
-  private last = { tier: -1, p: -1, w: -1 };
+  private last = { tier: -1, p: -1, w: -1, hp: '' };
+  private stunOverlay!: Phaser.GameObjects.Container;
+  private stunDim!: Phaser.GameObjects.Rectangle;
+  private stunTitle!: Phaser.GameObjects.Text;
+  private stunBtn!: LabelBtn;
 
   constructor() {
     super('UI');
@@ -79,8 +85,13 @@ export class UIScene extends Phaser.Scene {
     controls.onKey('KeyP', () => this.togglePause());
     controls.onKey('KeyM', () => this.toggleSound());
     controls.onKey('KeyB', () => {
-      if (!state.selecting && !state.shopOpen && !state.paused) this.game.events.emit('open-shop');
+      if (!state.selecting && !state.shopOpen && !state.paused && !state.stunned) this.game.events.emit('open-shop');
     });
+    const again = () => {
+      if (state.stunShown) this.game.events.emit('respawn');
+    };
+    controls.onKey('Enter', again);
+    controls.onKey('Space', again);
     // персонаж выбран: если игра стояла на паузе (выбор открыт из меню), продолжаем
     this.game.events.on('skin-chosen', () => {
       if (state.paused) this.togglePause();
@@ -138,6 +149,11 @@ export class UIScene extends Phaser.Scene {
       .container(0, 0, [this.overlayDim, this.overlayTitle, this.resumeBtn.box, this.changeBtn.box])
       .setDepth(50)
       .setVisible(false);
+    // оглушён: здоровье кончилось, окно с одной кнопкой «Заново» (без крови, п. 3.4.3)
+    this.stunDim = this.add.rectangle(0, 0, 10, 10, 0x0b0d1a, 0.5).setOrigin(0, 0).setInteractive();
+    this.stunTitle = this.add.text(0, 0, '', this.textStyle(48, 9)).setOrigin(0.5);
+    this.stunBtn = this.makeLabelButton('stun_btn', GREEN, () => this.game.events.emit('respawn'));
+    this.stunOverlay = this.add.container(0, 0, [this.stunDim, this.stunTitle, this.stunBtn.box]).setDepth(52).setVisible(false);
   }
 
   // ---------- раскладка ----------
@@ -208,7 +224,21 @@ export class UIScene extends Phaser.Scene {
       y += bh + 14 * u;
     }
 
-    this.last = { tier: -1, p: -1, w: -1 };
+    // окно «оглушён»
+    this.stunDim.setSize(W, H);
+    this.stunTitle.setStyle(this.textStyle(48, 9));
+    const ty = Math.max(46 * u, H * 0.2);
+    this.stunTitle.setText(t('stun_title')).setPosition(W / 2, ty);
+    this.stunBtn.text.setStyle(this.textStyle(28, 5));
+    this.stunBtn.text.setText(t('stun_btn'));
+    const sw = Math.max(260 * u, this.stunBtn.text.width + 70 * u);
+    this.stunBtn.bg.clear();
+    this.fillButton(this.stunBtn.bg, -sw / 2, -bh / 2, sw, bh, 16 * u, GREEN);
+    this.stunBtn.box.setPosition(W / 2, ty + this.stunTitle.height / 2 + 20 * u + bh / 2);
+    this.stunBtn.box.setSize(sw, bh);
+    this.stunBtn.box.setInteractive(new Phaser.Geom.Rectangle(-sw / 2, -bh / 2, sw, bh), Phaser.Geom.Rectangle.Contains);
+
+    this.last = { tier: -1, p: -1, w: -1, hp: '' };
   }
 
   private barWidth(): number {
@@ -296,7 +326,7 @@ export class UIScene extends Phaser.Scene {
   /** Красная точка на кнопке и стрелка-подсказка: можно купить улучшение. */
   private updateShopHint(time: number): void {
     const u = this.u;
-    const blocked = state.selecting || state.shopOpen || state.paused;
+    const blocked = state.selecting || state.shopOpen || state.paused || state.stunned;
     const afford = canAffordAny(save.data.up, state.coins);
     const r = this.shopRect;
     this.shopDot.clear();
@@ -351,7 +381,7 @@ export class UIScene extends Phaser.Scene {
 
   // ---------- действия ----------
   private togglePause(): void {
-    if (state.selecting || state.shopOpen) return;
+    if (state.selecting || state.shopOpen || state.stunned) return;
     state.paused = !state.paused;
     platform.gameplay(!state.paused);
     this.overlay.setVisible(state.paused);
@@ -371,10 +401,12 @@ export class UIScene extends Phaser.Scene {
     const u = this.u;
     const p = Math.max(0, Math.min(1, state.growth / state.need));
     const bw = this.barWidth();
-    if (this.last.tier !== state.tier || Math.abs(this.last.p - p) > 0.002 || this.last.w !== bw) {
-      this.last = { tier: state.tier, p, w: bw };
+    const hpKey = state.tier >= SURFACE_TIER ? `${Math.round(state.hp * 2)}:${state.hpMax}:${state.hpFlash > 0 ? 1 : 0}` : '-';
+    if (this.last.tier !== state.tier || Math.abs(this.last.p - p) > 0.002 || this.last.w !== bw || this.last.hp !== hpKey) {
+      this.last = { tier: state.tier, p, w: bw, hp: hpKey };
       this.drawBar(p, bw, u);
     }
+    this.stunOverlay.setVisible(state.stunShown);
     // монеты: число и плашка по ширине числа, при выигрыше «подпрыгивают»
     if (this.shownCoins !== state.coins) {
       const gained = this.shownCoins >= 0 && state.coins > this.shownCoins;
@@ -432,8 +464,10 @@ export class UIScene extends Phaser.Scene {
     const cx = m + r;
     const cy = m + r;
     const bx = cx + r + 6 * u;
-    const bh = 22 * u;
-    const by = cy - bh / 2;
+    // с поверхности (зона 2) под полосой роста появляется полоса здоровья: две тонкие полосы рядом со значком тира
+    const hpOn = state.tier >= SURFACE_TIER;
+    const bh = (hpOn ? 15 : 22) * u;
+    const by = hpOn ? cy - 10 * u - bh / 2 : cy - bh / 2;
     const g = this.bar;
     g.clear();
     g.fillStyle(INK, 1).fillRoundedRect(bx - 3 * u, by - 3 * u, bw + 6 * u, bh + 6 * u, bh / 2 + 3 * u);
@@ -442,6 +476,26 @@ export class UIScene extends Phaser.Scene {
       const fw = Math.max(bh, bw * p);
       g.fillStyle(0xffb020, 1).fillRoundedRect(bx, by, fw, bh, bh / 2);
       g.fillStyle(0xffffff, 0.35).fillRoundedRect(bx + 3 * u, by + 3 * u, fw - 6 * u, bh * 0.35, bh * 0.2);
+    }
+    if (hpOn) {
+      const hy = cy + 10 * u - bh / 2;
+      const q = Math.max(0, Math.min(1, state.hp / Math.max(1, state.hpMax)));
+      g.fillStyle(INK, 1).fillRoundedRect(bx - 3 * u, hy - 3 * u, bw + 6 * u, bh + 6 * u, bh / 2 + 3 * u);
+      g.fillStyle(0x4a2f1f, 1).fillRoundedRect(bx, hy, bw, bh, bh / 2);
+      if (q > 0.01) {
+        const fw = Math.max(bh, bw * q);
+        const col = state.hpFlash > 0 ? 0xffffff : q > 0.5 ? 0x6bd94a : q > 0.25 ? 0xffb020 : 0xff6a3d;
+        g.fillStyle(col, 1).fillRoundedRect(bx, hy, fw, bh, bh / 2);
+        g.fillStyle(0xffffff, 0.35).fillRoundedRect(bx + 3 * u, hy + 3 * u, fw - 6 * u, bh * 0.35, bh * 0.2);
+      }
+      // сердечко у начала полосы
+      const hx = bx + bh * 0.62;
+      const hc = hy + bh / 2;
+      const rr = bh * 0.2;
+      g.fillStyle(INK, 1).fillCircle(hx - rr, hc - rr * 0.4, rr * 1.35).fillCircle(hx + rr, hc - rr * 0.4, rr * 1.35);
+      g.fillTriangle(hx - rr * 2.3, hc - rr * 0.1, hx + rr * 2.3, hc - rr * 0.1, hx, hc + rr * 2.3);
+      g.fillStyle(0xff5a5a, 1).fillCircle(hx - rr, hc - rr * 0.4, rr).fillCircle(hx + rr, hc - rr * 0.4, rr);
+      g.fillTriangle(hx - rr * 1.9, hc - rr * 0.1, hx + rr * 1.9, hc - rr * 0.1, hx, hc + rr * 1.8);
     }
     g.fillStyle(INK, 1).fillCircle(cx, cy, r + 3 * u);
     g.fillStyle(0x6bbf3a, 1).fillCircle(cx, cy, r);

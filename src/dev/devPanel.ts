@@ -1,5 +1,6 @@
 import type { SkinId } from '../data/skins';
 import type { ChallengeKind } from '../data/challenges';
+import type { SurfaceKind } from '../data/surface';
 
 /** Панель разработчика: только в dev-сборке (в релиз не попадает, п. 1.14: никакой «кухни» на экране). */
 export interface DevApi {
@@ -14,6 +15,12 @@ export interface DevApi {
   addCoins(n: number): void;
   openSelect(): void;
   openShop(): void;
+  placeSurface(kind: SurfaceKind, x: number): { r: number; cy: number; w: number; h: number };
+  setHp(n: number): void;
+  hit(n: number): void;
+  hurt(n: number): void;
+  respawn(): void;
+  freeze(on: boolean): void;
   reportChallenge(kind: ChallengeKind, amount: number): void;
   resetTutorial(): void;
   resetSave(): void;

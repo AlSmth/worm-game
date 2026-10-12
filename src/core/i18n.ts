@@ -63,6 +63,14 @@ const ru = {
   ch_tier: 'Достигните уровня {n}',
   ch_jump: 'Выпрыгните из земли: {n}',
   ch_done: 'Испытание выполнено! +{n} монет',
+  ch_people: 'Съешьте людей: {n}',
+  ch_cars: 'Съешьте машины: {n}',
+  ch_buildings: 'Съешьте дома: {n}',
+  ch_guards: 'Съешьте технику охраны: {n}',
+  stun_title: 'Оглушён!',
+  stun_btn: 'Заново',
+  hint_surface: 'Люди разбегаются! Прыгайте за ними. Под землёй безопасно, там здоровье восстанавливается',
+  hint_guard: 'Осторожно: техника охраны стреляет. Уходите под землю, чтобы переждать',
 } as const;
 
 export type TextKey = keyof typeof ru;
@@ -128,6 +136,14 @@ const en: Record<TextKey, string> = {
   ch_tier: 'Reach level {n}',
   ch_jump: 'Leap out of the ground: {n}',
   ch_done: 'Challenge complete! +{n} coins',
+  ch_people: 'Eat people: {n}',
+  ch_cars: 'Eat vehicles: {n}',
+  ch_buildings: 'Eat buildings: {n}',
+  ch_guards: 'Eat guard machines: {n}',
+  stun_title: 'Stunned!',
+  stun_btn: 'Try again',
+  hint_surface: 'People are running! Leap after them. Underground is safe and heals you',
+  hint_guard: 'Careful: guard machines shoot. Dive underground to wait it out',
 };
 
 const dict: Record<Lang, Record<TextKey, string>> = { ru, en };

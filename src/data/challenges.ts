@@ -6,7 +6,7 @@ import { SURFACE_TIER } from './world';
  * Испытания (концепт, раздел 10): три активных одновременно, за выполнение монеты, после выполнения заменяются новыми.
  * Версия 1 для зоны 1: что можно сделать под землёй и при первом выходе на поверхность. Все числа здесь.
  */
-export type ChallengeKind = 'eat' | 'beetle' | 'worm' | 'coins' | 'gems' | 'chests' | 'tier' | 'jump';
+export type ChallengeKind = 'eat' | 'beetle' | 'worm' | 'coins' | 'gems' | 'chests' | 'tier' | 'jump' | 'people' | 'cars' | 'buildings' | 'guards';
 
 export interface ChallengeState {
   k: ChallengeKind;
@@ -42,6 +42,11 @@ export const DEFS: Def[] = [
   { kind: 'chests', key: 'ch_chests', base: 1, step: 0.2, reward: 30, minTier: 3 },
   { kind: 'tier', key: 'ch_tier', base: 0, step: 0, reward: 25, minTier: 1 },
   { kind: 'jump', key: 'ch_jump', base: 3, step: 0.2, reward: 15, minTier: SURFACE_TIER },
+  // зона 2: люди, машины, дома, техника охраны
+  { kind: 'people', key: 'ch_people', base: 12, step: 0.12, reward: 14, minTier: SURFACE_TIER },
+  { kind: 'cars', key: 'ch_cars', base: 4, step: 0.12, reward: 18, minTier: 7 },
+  { kind: 'buildings', key: 'ch_buildings', base: 3, step: 0.1, reward: 20, minTier: 8 },
+  { kind: 'guards', key: 'ch_guards', base: 2, step: 0.1, reward: 28, minTier: 8 },
 ];
 
 const KINDS = new Set<string>(DEFS.map((d) => d.kind));

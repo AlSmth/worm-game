@@ -110,6 +110,8 @@ export class Worm {
   upgrades: Upgrades = { jump: 0, hp: 0, speed: 0 };
   /** Можно ли выбраться на поверхность (открывается ростом, см. data/world.ts). */
   canExit = true;
+  /** Оглушён: не плывёт и не слушается, падает, если был в воздухе. */
+  stunned = false;
   onExit?: () => void;
   onEnter?: () => void;
   /** Червь упёрся в закрытую «корку» под травой (сцена показывает подсказку). */
@@ -312,6 +314,19 @@ export class Worm {
     return { x: this.x + ox * c - oy * s, y: this.y + ox * s + oy * c };
   }
 
+  /** Круги тела для попаданий снарядов: голова, пасть и несколько кругов вдоль тела (px мира). */
+  hitCircles(out: Array<{ x: number; y: number; r: number }>): Array<{ x: number; y: number; r: number }> {
+    out.length = 0;
+    const S = this.scale;
+    out.push({ x: this.x, y: this.y, r: HEAD_RADIUS * S * 0.95 });
+    const m = this.mouth();
+    out.push({ x: m.x, y: m.y, r: 34 * S });
+    const L = Math.max(1, this.segs * rig.step);
+    const count = Math.max(2, Math.ceil(L / rig.spacing) + 1);
+    for (let k = 6; k < count && k < this.nodes.length; k += 6) out.push({ x: this.nodes[k].x, y: this.nodes[k].y, r: this.radii[k] * S * 0.9 });
+    return out;
+  }
+
   /** Проглоченный кусок бежит по телу: мультяшное утолщение от головы к хвосту. */
   gulp(strength = 0.16): void {
     this.gulps.push({ d: 0, a: strength });
@@ -354,11 +369,13 @@ export class Worm {
 
   private move(dt: number, steer: Steer): void {
     const S = this.scale;
-    const swim = this.swimSpeed;
+    const swim = this.stunned ? 0 : this.swimSpeed;
     const half = WORLD_WIDTH / 2 - this.headRadius * 1.4;
     if (!this.inAir) {
       let want: number | null = null;
-      if (steer.mode === 'target') {
+      if (this.stunned) {
+        want = null;
+      } else if (steer.mode === 'target') {
         const dx = steer.tx - this.x;
         const dy = steer.ty - this.y;
         if (dx * dx + dy * dy > (0.9 * this.headRadius) ** 2) want = Math.atan2(dy, dx);

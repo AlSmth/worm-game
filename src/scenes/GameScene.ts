@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 import { Worm, type Steer } from '../game/Worm';
 import { PreySystem, type PreyItem, type View } from '../game/Prey';
 import { TreasureSystem, type TreasureItem } from '../game/Treasure';
+import { SurfaceSystem, type SurfaceItem, type WormInfo, type BodyCircle } from '../game/Surface';
 import { Challenges, type ChallengeDone } from '../game/Challenges';
 import type { ChallengeKind } from '../data/challenges';
 import { WorldBackground } from '../game/Background';
@@ -11,10 +12,11 @@ import { sfx } from '../core/audio';
 import { hideLoader } from '../core/loader';
 import { state, hitsUi, showToast } from '../core/state';
 import { platform } from '../platform/platform';
-import { save, TUTORIAL_COIN, TUTORIAL_EAT } from '../platform/save';
+import { save, TUTORIAL_COIN, TUTORIAL_EAT, TUTORIAL_GUARD, TUTORIAL_SURFACE } from '../platform/save';
 import { MAX_TIER, growthFor, growthNeeded, segmentsAt, wormScale } from '../data/growth';
 import { clampLevel, type LineId, type Upgrades } from '../data/upgrades';
 import { SURFACE_TIER, WORLD_WIDTH } from '../data/world';
+import { HIT_GRACE, HP_REGEN, RESPAWN_GRACE, SOIL_GROWTH_FACTOR, maxHp, type SurfaceKind } from '../data/surface';
 import type { SkinId } from '../data/skins';
 import { mountDevPanel, type DevApi } from '../dev/devPanel';
 
@@ -30,6 +32,7 @@ export class GameScene extends Phaser.Scene {
   worm!: Worm;
   prey!: PreySystem;
   treasure!: TreasureSystem;
+  surface!: SurfaceSystem;
   private bg!: WorldBackground;
   private fx!: Fx;
   private pointerActive = false;
@@ -50,6 +53,12 @@ export class GameScene extends Phaser.Scene {
   /** Самая большая высота над землёй за текущий прыжок, px мира. */
   private maxHeight = 0;
   private tailT = 0;
+  /** Неуязвимость после попадания и возрождения, с. */
+  private hpGrace = 0;
+  private stars: Phaser.GameObjects.Image[] = [];
+  private circles: BodyCircle[] = [];
+  /** Для проверок: червь стоит на месте (как оглушённый), но игра идёт. */
+  private freeze = false;
 
   constructor() {
     super('Game');
@@ -68,6 +77,11 @@ export class GameScene extends Phaser.Scene {
     state.paused = false;
     state.selecting = false;
     state.shopOpen = false;
+    state.hpMax = maxHp(d.up.hp);
+    state.hp = state.hpMax;
+    state.hpFlash = 0;
+    state.stunned = false;
+    state.stunShown = false;
     if (this.quests.load(d.ch, d.tier)) save.patch({ ch: this.quests.list });
 
     const tf = this.fractionalTier();
@@ -86,15 +100,29 @@ export class GameScene extends Phaser.Scene {
     this.treasure = new TreasureSystem(this, (x, y) => this.glint(x, y));
     this.tutArrow = this.add.image(0, 0, 'fx', 'fx-arrow').setDepth(600).setVisible(false);
     this.updateCamera(0, true);
-    this.prey.populate(0, this.worm.y, S0, this.view(), this.worm.canExit, state.tier);
+    this.surface = new SurfaceSystem(this, {
+      onShoot: (x, y, big) => this.onGuardShot(x, y, big),
+      onImpact: (x, y, big) => this.onShotImpact(x, y, big),
+    });
+    this.prey.populate(0, this.worm.y, S0, this.view(), state.tier);
     this.treasure.populate(0, this.worm.y, S0, this.view());
+    this.surface.populate(0, S0, this.view(), state.tier);
 
     this.setupInput();
     platform.onPause((p) => this.onPlatformPause(p));
     this.game.events.on('skin-chosen', (id: SkinId) => this.onSkinChosen(id));
     this.game.events.on('open-select', () => this.openSelect(false));
     this.game.events.on('open-shop', () => this.openShop());
-    this.game.events.on('upgrade-bought', (_line: LineId, _level: number) => this.worm.setUpgrades(save.data.up));
+    this.game.events.on('upgrade-bought', (line: LineId, level: number) => {
+      this.worm.setUpgrades(save.data.up);
+      if (line === 'hp') {
+        // броня прибавляет запас здоровья и сразу лечит на прибавку
+        const old = state.hpMax;
+        state.hpMax = maxHp(level);
+        state.hp = Math.min(state.hpMax, state.hp + (state.hpMax - old));
+      }
+    });
+    this.game.events.on('respawn', () => this.respawn());
     this.game.events.on('shop-closed', (bought: boolean) => this.onShopClosed(bought));
 
     this.scene.launch('UI');
@@ -118,7 +146,7 @@ export class GameScene extends Phaser.Scene {
 
   // ---------- магазин ----------
   private openShop(): void {
-    if (state.selecting || state.shopOpen || state.paused) return;
+    if (state.selecting || state.shopOpen || state.paused || state.stunned) return;
     state.shopOpen = true;
     platform.gameplay(false);
     this.scene.launch('Shop');
@@ -178,34 +206,56 @@ export class GameScene extends Phaser.Scene {
     return NO_STEER;
   }
 
-  /** Автопилот для проверки и показа: плывёт к ближайшей съедобной добыче. */
+  /** Автопилот для проверки и показа: плывёт к ближайшей съедобной добыче, на поверхности прыгает за людьми; при малом здоровье ныряет. */
   private autoSteer(): Steer {
     const w = this.worm;
-    let best: PreyItem | null = null;
+    // здоровье на исходе: прочь под землю, там оно восстанавливается
+    if (w.canExit && state.hp < state.hpMax * 0.45) return { mode: 'target', tx: w.x + 300, ty: w.y + 900 * w.scale, dx: 0, dy: 0 };
+    let tx = w.x + 400;
+    let ty = w.y + 60;
     let bd = Infinity;
     for (const it of this.prey.items) {
       if (it.dying || !this.prey.isEdible(it, w.mouthRadius * 0.95)) continue;
       const dd = Math.hypot(it.x - w.x, it.y - w.y);
       if (dd < bd) {
         bd = dd;
-        best = it;
+        tx = it.x;
+        ty = it.y;
       }
     }
-    if (best) return { mode: 'target', tx: best.x, ty: best.y, dx: 0, dy: 0 };
-    return { mode: 'target', tx: w.x + 400, ty: w.y + 60, dx: 0, dy: 0 };
+    if (w.canExit) {
+      // добычу на поверхности предпочитаем: с неё идёт рост
+      for (const it of this.surface.items) {
+        if (it.dying || !this.surface.isEdible(it, w.mouthRadius * 0.95)) continue;
+        const dd = Math.hypot(it.x - w.x, it.cy - w.y) * 0.5;
+        if (dd < bd) {
+          bd = dd;
+          tx = it.x;
+          ty = it.cy;
+        }
+      }
+    }
+    return { mode: 'target', tx, ty, dx: 0, dy: 0 };
   }
 
   // ---------- шаг ----------
   override update(time: number, delta: number): void {
     if (state.paused || state.selecting || state.shopOpen) return;
+    if (state.stunShown) {
+      // окно «Заново» открыто: игра стоит, звёздочки над головой продолжают кружить
+      this.updateStars(time);
+      return;
+    }
     const dt = Math.min(delta / 1000, 0.05);
     const w = this.worm;
     w.canExit = state.tier >= SURFACE_TIER;
-    w.update(dt, this.readSteer(), time);
+    w.stunned = state.stunned || this.freeze;
+    w.update(dt, w.stunned ? NO_STEER : this.readSteer(), time);
     const view = this.view();
-    this.prey.update(dt, time / 1000, w.x, w.y, w.scale, view, w.canExit, state.tier, w.mouthRadius);
+    this.prey.update(dt, time / 1000, w.x, w.y, w.scale, view, state.tier, w.mouthRadius);
     this.treasure.update(dt, time / 1000, w.x, w.y, w.scale, view, w.mouthRadius);
-    this.checkEating(time);
+    this.updateSurface(dt, time, view);
+    if (!state.stunned) this.checkEating(time);
     this.dig(dt);
     this.updateTutorial(time);
     this.updateTrail(dt);
@@ -213,6 +263,7 @@ export class GameScene extends Phaser.Scene {
     this.updateCamera(dt, false);
     this.bg.update(this.cameras.main, w.scale);
     this.fx.update(dt);
+    this.updateStars(time);
   }
 
   private view(): View {
@@ -279,6 +330,15 @@ export class GameScene extends Phaser.Scene {
       if (c === 'eat') this.eatTreasure(tr, m, now);
       else if (c === 'near') near = true;
     }
+    // добыча над землёй: кусать можно, только когда пасть над землёй (под землёй червь её не достаёт)
+    if (w.canExit && m.y < -8) {
+      for (const it of this.surface.items) {
+        if (it.dying || !this.surface.isEdible(it, mr)) continue;
+        const c = consider(it.x, it.cy, it.r);
+        if (c === 'eat') this.eatSurface(it, m, now);
+        else if (c === 'near') near = true;
+      }
+    }
     w.setHint(near ? 'open' : 'idle');
   }
 
@@ -293,11 +353,37 @@ export class GameScene extends Phaser.Scene {
     this.eaten++;
     this.quest('eat', 1);
     this.quest(it.species, 1);
-    this.addGrowth(growthFor(it.r, w.scale));
+    this.addGrowth(growthFor(it.r, w.scale) * (state.tier >= SURFACE_TIER ? SOIL_GROWTH_FACTOR : 1));
+    this.markEaten();
+  }
+
+  private markEaten(): void {
     if (!(save.data.tutorial & TUTORIAL_EAT)) {
       save.patch({ tutorial: save.data.tutorial | TUTORIAL_EAT });
       showToast('tut_good', 3.5);
     }
+  }
+
+  /** Добыча над землёй съедена: люди, машины, дома, техника охраны. Большое сопровождается облаком пыли. */
+  private eatSurface(it: SurfaceItem, m: { x: number; y: number }, now: number): void {
+    const w = this.worm;
+    const big = it.r > 100;
+    sfx.play(big ? 'chest' : 'eat');
+    w.flash('chomp', 180, now);
+    w.gulp(0.1 + Math.min(0.14, it.r / (w.mouthRadius * 7)));
+    this.fx.pop(m.x, m.y, 1, Math.max(120, it.r * 1.8));
+    this.fx.burst(m.x, m.y, w.scale, { count: big ? 12 : 7, frame: 'fx-star', colors: STARS, speed: 420, life: 0.6, gravity: 900, size: big ? 28 : 22 });
+    this.fx.burst(it.x, it.cy, 1, { count: big ? 5 : 2, frame: 'fx-dust-poof', colors: [0xf0d9b5], speed: 220, life: 0.8, gravity: 0, size: Math.max(70, it.w * 0.45) });
+    this.surface.consume(it, m.x, m.y);
+    this.eaten++;
+    this.quest('eat', 1);
+    const k = it.spec.kind;
+    if (k === 'person') this.quest('people', 1);
+    else if (k === 'car' || k === 'truck' || k === 'bus') this.quest('cars', 1);
+    else if (k === 'patrol' || k === 'heavy') this.quest('guards', 1);
+    else this.quest('buildings', 1);
+    this.addGrowth(it.spec.points);
+    this.markEaten();
   }
 
   /** Сокровище съедено: монеты на счёт, искры, всплывающее число. */
@@ -484,11 +570,113 @@ export class GameScene extends Phaser.Scene {
     if (lvl >= 5) this.fx.burst(bx, by, k, { count: 1, frame: 'fx-coin-sparkle', colors: GOLD, speed: 90, life: 0.8, gravity: 0, size: 34 });
   }
 
+  // ---------- опасности и здоровье ----------
+  /** Шаг поверхности: люди, машины, охрана и снаряды; попадания по червю; лечение под землёй. */
+  private updateSurface(dt: number, time: number, view: View): void {
+    const w = this.worm;
+    this.hpGrace = Math.max(0, this.hpGrace - dt);
+    state.hpFlash = Math.max(0, state.hpFlash - dt);
+    const info: WormInfo = { x: w.x, y: w.y, vx: w.vx, vy: w.vy, scale: w.scale, exposed: w.y < w.headRadius * 0.7 && !state.stunned, scary: w.y < w.headRadius * 2.5 };
+    this.surface.update(dt, info, view, state.tier, w.canExit);
+    this.surface.highlight(w.mouthRadius, w.canExit, time / 1000);
+    if (this.surface.shots.length && w.y < w.headRadius * 1.5) {
+      this.surface.collide(w.hitCircles(this.circles), (x, y, dmg) => this.hurt(dmg, x, y));
+    }
+    // под землёй червь лечится
+    if (!state.stunned && state.hp < state.hpMax && w.y > w.headRadius * 1.1) state.hp = Math.min(state.hpMax, state.hp + HP_REGEN * dt);
+    // первая встреча с охраной: предупреждение (один раз, когда нет другого сообщения)
+    if (w.canExit && !(save.data.tutorial & TUTORIAL_GUARD) && state.toast.left <= 0) {
+      const seen = this.surface.items.some((it) => !it.dying && it.spec.behavior === 'guard' && Math.abs(it.x - w.x) < view.w * 0.6);
+      if (seen) {
+        save.patch({ tutorial: save.data.tutorial | TUTORIAL_GUARD });
+        showToast('hint_guard', 5);
+      }
+    }
+  }
+
+  private onGuardShot(x: number, y: number, big: boolean): void {
+    sfx.play('shoot');
+    this.fx.pop(x, y, 1, big ? 120 : 80, 0xffd27a);
+  }
+
+  private onShotImpact(x: number, y: number, big: boolean): void {
+    const S = big ? 1.4 : 1;
+    this.fx.burst(x, y, S, { count: 4, frame: 'fx-dirt-chunk', colors: DIRT, speed: 260, life: 0.5, gravity: 1100, size: 16 });
+    this.fx.burst(x, y - 10, S, { count: 1, frame: 'fx-dust-poof', colors: [0xf0d9b5], speed: 90, life: 0.5, gravity: 0, size: 60 });
+  }
+
+  /** Попадание снаряда: урон, вспышка, неуязвимость на секунду; здоровье кончилось — червь оглушён. */
+  private hurt(dmg: number, x: number, y: number): void {
+    if (state.stunned || this.hpGrace > 0) return;
+    const w = this.worm;
+    state.hp = Math.max(0, state.hp - dmg);
+    state.hpFlash = 0.4;
+    this.hpGrace = HIT_GRACE;
+    sfx.play('hit');
+    w.flash('hurt', 700, this.time.now);
+    this.cameras.main.shake(150, 0.006);
+    this.fx.burst(x, y, w.scale, { count: 9, frame: 'fx-star', colors: [0xffffff, 0xffb347, 0xffd23f], speed: 420, life: 0.5, gravity: 600, size: 22 });
+    this.fx.floatText(w.x, w.y - 110 * w.scale, w.scale, `-${Math.round(dmg)}`, '#ff9a8a');
+    if (state.hp <= 0) this.stun();
+  }
+
+  /** Здоровье кончилось: червь оглушён (звёздочки над головой, без крови), через секунду окно «Заново» (п. 3.4.3). */
+  private stun(): void {
+    state.stunned = true;
+    sfx.play('stun');
+    this.worm.flash('hurt', 1e9, this.time.now);
+    for (let i = 0; i < 5; i++) {
+      this.stars.push(this.add.image(0, 0, 'fx', 'fx-star').setDepth(520).setTint(STARS[i % STARS.length]));
+    }
+    this.time.delayedCall(1100, () => {
+      if (!state.stunned) return;
+      state.stunShown = true;
+      platform.gameplay(false);
+    });
+  }
+
+  private updateStars(time: number): void {
+    if (!this.stars.length) return;
+    const w = this.worm;
+    const k = w.scale;
+    this.stars.forEach((st, i) => {
+      const a = time / 380 + (i * Math.PI * 2) / this.stars.length;
+      st.setPosition(w.x + Math.cos(a) * 70 * k, w.y - 105 * k + Math.sin(a) * 18 * k)
+        .setScale((34 * k) / 40)
+        .setRotation(a)
+        .setDepth(Math.sin(a) > 0 ? 520 : 5);
+    });
+  }
+
+  /** «Заново»: червь возвращается под землю на месте оглушения с полным здоровьем и недолгой неуязвимостью. */
+  private respawn(): void {
+    if (!state.stunned) return;
+    const w = this.worm;
+    state.stunned = false;
+    state.stunShown = false;
+    w.stunned = false;
+    this.stars.forEach((st) => st.destroy());
+    this.stars = [];
+    state.hp = state.hpMax;
+    this.hpGrace = RESPAWN_GRACE;
+    w.flash('happy', 600, this.time.now);
+    w.reset(w.x, 300 * w.scale, 0);
+    this.camReady = false;
+    this.surface.shots.forEach((sh) => sh.img.destroy());
+    this.surface.shots = [];
+    platform.gameplay(true);
+    sfx.play('grow');
+  }
+
   // ---------- поверхность ----------
   private onExit(): void {
     const w = this.worm;
     sfx.play('jump');
     this.quest('jump', 1);
+    if (!(save.data.tutorial & TUTORIAL_SURFACE)) {
+      save.patch({ tutorial: save.data.tutorial | TUTORIAL_SURFACE });
+      showToast('hint_surface', 6);
+    }
     this.fx.burst(w.x, 0, w.scale, { count: 12, frame: 'fx-dirt-chunk', colors: DIRT, speed: 420, life: 0.7, gravity: 1500, size: 20 });
     this.fx.burst(w.x, 0, w.scale, { count: 3, frame: 'fx-dust-poof', colors: [0xf0d9b5], speed: 200, life: 0.7, gravity: 0, size: 70 });
   }
@@ -511,6 +699,10 @@ export class GameScene extends Phaser.Scene {
   private setUpgrade(line: keyof Upgrades, level: number): void {
     save.patch({ up: { [line]: clampLevel(level) } });
     this.worm.setUpgrades(save.data.up);
+    if (line === 'hp') {
+      state.hpMax = maxHp(save.data.up.hp);
+      state.hp = Math.min(state.hp, state.hpMax);
+    }
   }
 
   private installDev(): void {
@@ -526,6 +718,13 @@ export class GameScene extends Phaser.Scene {
         armor: this.worm.upgrades.hp,
         fins: this.worm.upgrades.speed,
         up: { ...save.data.up },
+        hp: Math.round(state.hp * 10) / 10,
+        hpMax: state.hpMax,
+        stunned: state.stunned,
+        stunShown: state.stunShown,
+        hpGrace: Math.round(this.hpGrace * 100) / 100,
+        surface: this.surface.items.filter((it) => !it.dying).map((it) => it.spec.kind),
+        shots: this.surface.shots.length,
         gear: this.worm.gearInfo(),
         shopOpen: state.shopOpen,
         challenges: this.quests.list.map((c) => ({ ...c })),
@@ -576,6 +775,24 @@ export class GameScene extends Phaser.Scene {
       },
       openSelect: () => this.openSelect(false),
       openShop: () => this.openShop(),
+      placeSurface: (kind: SurfaceKind, x: number) => {
+        const it = this.surface.place(kind, x, this.worm.scale);
+        (window as unknown as { __test_it?: SurfaceItem }).__test_it = it;
+        return { r: it.r, cy: it.cy, w: it.w, h: it.h };
+      },
+      setHp: (n: number) => {
+        state.hp = Math.max(0, Math.min(state.hpMax, n));
+      },
+      // hit уважает неуязвимость после попадания, hurt её сбрасывает (проверки оглушения)
+      hit: (n: number) => this.hurt(n, this.worm.x, this.worm.y),
+      hurt: (n: number) => {
+        this.hpGrace = 0;
+        this.hurt(n, this.worm.x, this.worm.y);
+      },
+      respawn: () => this.respawn(),
+      freeze: (on: boolean) => {
+        this.freeze = on;
+      },
       reportChallenge: (kind: ChallengeKind, amount: number) => this.quest(kind, amount),
       resetTutorial: () => {
         save.patch({ tutorial: 0 });

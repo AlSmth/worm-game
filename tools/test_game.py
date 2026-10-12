@@ -702,8 +702,8 @@ def t_prey(b, shots):
     check('добыча: кадры жука и червячка сверху, по два шага', all(f in frames for f in ('z1-beetle-a', 'z1-beetle-b', 'z1-worm-a', 'z1-worm-b')), str(frames))
     kinds = b.eval("(function(){var o={};window.__dev.scene.prey.items.forEach(function(it){o[it.species]=(o[it.species]||0)+1});return o})()")
     check('добыча: есть и жуки, и червячки', kinds.get('beetle', 0) > 0 and kinds.get('worm', 0) > 0, str(kinds))
-    check('добыча: пока выход закрыт, вся добыча в земле (нет «воздушной»)',
-          b.eval("window.__dev.scene.prey.items.every(function(it){return it.kind==='soil'})"))
+    check('добыча: подземная добыча лежит в земле (над землёй только добыча поверхности)',
+          b.eval("window.__dev.scene.prey.items.every(function(it){return it.y>0})"))
     seen = set()
     t0 = time.time()
     while time.time() - t0 < 1.2:
@@ -896,7 +896,10 @@ def t_tutorial(b, shots):
     seed_chosen(b, tutorial=0)
     b.open(URL)
     b.wait_for('!!window.__dev', 30)
-    time.sleep(0.25)
+    # съедобная добыча гарантированно в поле зрения (но не на пути пасти): иначе стрелке иногда нечего показывать
+    b.eval("""(function(){var s=window.__dev.scene, w=s.worm, it=s.prey.items.filter(function(i){return !i.dying})[0];
+      it.x=w.x+450; it.y=w.y-130; it.baseY=it.y; it.vx=0; it.turnIn=1e9; it.r=26; it.img.setScale(26/34); return 0})()""")
+    time.sleep(0.3)
     freeze = 'window.__dev.scene.scene.pause(); 0'
     thaw = 'window.__dev.scene.scene.resume(); 0'
     b.eval(freeze)
@@ -1437,6 +1440,228 @@ def t_shop_english(b, shots):
     check('English: нет ошибок в консоли', not b.errors(), str(b.errors()))
 
 
+def zone2_start(b, tier=5, up=(0, 0, 0), coins=0, ch='[]', lang=None):
+    """Зона 2: сохранение с нужным тиром, игра запущена, червь далеко от стартовой расстановки и стоит на месте (freeze)."""
+    if lang:
+        b.add_init_script(FAKE_SDK.replace('__LANG__', lang))
+    seed_shop(b, coins=coins, up=up, tier=tier, tutorial=255, ch=ch)
+    boot(b, URL, choose=False)
+
+
+def far(b, y, x=30000):
+    """Поставить червя далеко от прежней расстановки и заморозить: рядом с ним нет чужой добычи, кроме поставленной тестом."""
+    b.eval("window.__dev.autopilot(false); window.__dev.setPos(%d, %d); window.__dev.freeze(true); 0" % (x, y))
+    time.sleep(0.5)
+
+
+def place(b, kind, dx=None, x=None):
+    """Поставить добычу поверхности перед ртом червя (dx от рта) или в точке x."""
+    if x is None:
+        mx = b.eval('window.__dev.scene.worm.mouth().x')
+        x = mx + (dx or 0)
+    return b.eval("window.__dev.placeSurface('%s', %f)" % (kind, x))
+
+
+def t_zone2_world(b, shots):
+    """Поверхность: люди, декор, дальние дома и холмы; лесенка съедобности по тирам; до открытия выхода добыча поверхности несъедобна."""
+    zone2_start(b, tier=5)
+    s = state(b)
+    kinds = s['surface']
+    check('поверхность: на 5-м тире вокруг червя люди и немного машин', kinds.count('person') >= 8 and len(kinds) == 18, str(kinds))
+    check('поверхность: фон над землёй: дальние дома и холмы видны', b.eval("window.__dev.scene.bg.skyline.visible && window.__dev.scene.bg.hills.visible") is True)
+    check('поверхность: есть декор (деревья, кусты, фонари)', b.eval("window.__dev.scene.surface.decor.length") >= 8)
+    b.screenshot(shots / 'g30-zone2.png')
+    check('поверхность: нет ошибок в консоли', not b.errors(), str(b.errors()))
+    # лесенка съедобности: вид -> (тир, при котором впервые съедобен)
+    far(b, 400)
+    ladder = [('car', 7), ('house', 8), ('patrol', 8), ('truck', 9), ('bus', 10), ('apartment', 11), ('heavy', 12), ('tower', 12), ('skyscraper', 12)]
+    bad = []
+    for kind, first in ladder:
+        place(b, kind, 4000)
+        for tier in (first - 1, first):
+            b.eval("window.__dev.setTier(%d); window.__dev.scene.worm.scale = window.__dev.scene.worm.targetScale; 0" % tier)
+            time.sleep(0.1)
+            ok = b.eval("(function(){var g=window.__dev.scene; return g.surface.isEdible(window.__test_it, g.worm.mouthRadius)})()")
+            if ok != (tier >= first):
+                bad.append((kind, tier, ok))
+    check('лесенка тиров: машины с 7-го, дома и лёгкая охрана с 8-го, грузовики с 9-го, автобусы с 10-го, многоэтажки с 11-го, тяжёлая техника и башни с 12-го', not bad, str(bad))
+    # пока выход закрыт (тир ниже 5), добыча поверхности не съедается
+    b.eval("window.__dev.setTier(4); 0")
+    far(b, 90, 20000)
+    e0 = state(b)['eaten']
+    place(b, 'person', 60)
+    time.sleep(0.8)
+    check('до 5-го тира добыча над землёй (люди на горизонте) не съедается', state(b)['eaten'] == e0 and state(b)['canExit'] is False, f"eaten {e0} -> {state(b)['eaten']}")
+    check('поверхность: нет ошибок в консоли после проверок', not b.errors(), str(b.errors()))
+
+
+def t_zone2_eat(b, shots):
+    """Поедание на поверхности: пасть над землёй съедает, под землёй нет; очки роста, испытания, люди бегут от червя, машины ускоряются."""
+    zone2_start(b, tier=5, ch='[{"k":"people","n":50,"p":0,"r":10},{"k":"eat","n":50,"p":0,"r":10},{"k":"tier","n":9,"p":5,"r":10}]')
+    far(b, -70)
+    g0 = state(b)
+    place(b, 'person', 0)
+    time.sleep(0.7)
+    s = state(b)
+    check('поверхность: человек перед пастью над землёй съеден', s['eaten'] == g0['eaten'] + 1, f"{g0['eaten']} -> {s['eaten']}")
+    check('поверхность: человек даёт 1 очко роста', abs((s['growth'] - g0['growth']) - 1) < 0.01, f"{g0['growth']} -> {s['growth']}")
+    ch = s['challenges']
+    check('испытания: съеденный человек засчитан в «людей» и «добычу»', ch[0]['p'] == 1 and ch[1]['p'] == 1, str(ch[:2]))
+    # под землёй пасть не достаёт
+    far(b, 90, 32000)
+    place(b, 'person', 0)
+    time.sleep(0.9)
+    check('поверхность: пасть под землёй не достаёт добычу на земле', b.eval('window.__test_it.dying') is False and b.eval('window.__dev.scene.surface.items.indexOf(window.__test_it)') >= 0, 'человек съеден из-под земли')
+    # люди бегут от червя
+    far(b, -120, 34000)
+    wx = b.eval('window.__dev.scene.worm.x')
+    place(b, 'person', x=wx + 450)
+    b.eval("window.__test_it.think=1e9; 0")
+    x0 = b.eval('window.__test_it.x')
+    time.sleep(1.0)
+    x1 = b.eval('window.__test_it.x')
+    check('поверхность: человек бежит от червя', x1 > x0 + 40, f'{x0:.0f} -> {x1:.0f}')
+    # машина с 7-го тира: даёт 5 очков, считается как машина
+    b.eval("window.__dev.setTier(7); 0")
+    far(b, -70, 36000)
+    g1 = state(b)
+    place(b, 'car', 0)
+    time.sleep(0.7)
+    s = state(b)
+    check('поверхность: на 7-м тире машина съедается и даёт 5 очков', s['eaten'] == g1['eaten'] + 1 and abs((s['growth'] - g1['growth']) - 5) < 0.01, f"{g1['eaten']}->{s['eaten']}, {g1['growth']}->{s['growth']}")
+    check('поверхность: подсветка у съедобной добычи', b.eval("window.__dev.scene.surface.items.some(function(i){return i.halo.visible})") is True)
+    check('поверхность: нет ошибок в консоли', not b.errors(), str(b.errors()))
+
+
+def t_zone2_danger(b, shots):
+    """Опасности: охрана целится и стреляет в червя над землёй, урон и неуязвимость, под землёй безопасно и лечит, оглушение и «Заново»."""
+    b.add_init_script(FAKE_SDK.replace('__LANG__', 'ru'))
+    zone2_start(b, tier=8)
+    far(b, -260)
+    s = state(b)
+    check('здоровье: на 8-м тире запас 100 и полоса видна', s['hp'] == 100 and s['hpMax'] == 100 and b.eval("window.__dev.scene.scene.get('UI').last.hp") != '-', f"{s['hp']}/{s['hpMax']}")
+    place(b, 'patrol', 520)
+    t0 = time.time()
+    shot = False
+    while time.time() - t0 < 7:
+        if state(b)['shots'] > 0:
+            shot = True
+            break
+        time.sleep(0.15)
+    check('охрана: машина целится и стреляет в червя над землёй', shot)
+    t0 = time.time()
+    while time.time() - t0 < 6 and state(b)['hp'] >= 100:
+        time.sleep(0.15)
+    s = state(b)
+    check('урон: попавший снаряд отнимает здоровье (8)', 90 <= s['hp'] <= 92.5, f"hp={s['hp']}")
+    check('урон: после попадания неуязвимость больше секунды', s['hpGrace'] > 0.2, f"hpGrace={s['hpGrace']}")
+    hp1 = s['hp']
+    b.eval('window.__dev.hit(20); 0')
+    check('урон: во время неуязвимости повторное попадание не засчитывается', state(b)['hp'] >= hp1 - 0.5, f"{hp1} -> {state(b)['hp']}")
+    b.screenshot(shots / 'g31-guard.png')
+    # под землёй безопасно: охрана не стреляет и не попадает
+    far(b, 900, 30000)
+    time.sleep(0.5)
+    b.eval('window.__dev.setHp(50); 0')
+    place(b, 'patrol', 520)
+    b.eval("(function(){var s=window.__dev.scene.surface; s.shots.forEach(function(x){x.img.destroy()}); s.shots=[]; return 0})()")
+    time.sleep(3.2)
+    s = state(b)
+    check('безопасно: червь под землёй охрана не видит, снарядов нет', s['shots'] == 0, f"shots={s['shots']}")
+    check('здоровье: под землёй восстанавливается (7 в секунду)', s['hp'] > 62, f"hp={s['hp']}")
+    # оглушение
+    far(b, -260, 31000)
+    log0 = len(b.eval('window.__sdkLog'))
+    b.eval('window.__dev.setHp(100); window.__dev.hurt(500); 0')
+    time.sleep(0.4)
+    s = state(b)
+    check('оглушение: здоровье кончилось, червь оглушён', s['stunned'] is True and s['hp'] == 0, f"stunned={s['stunned']}, hp={s['hp']}")
+    time.sleep(1.4)
+    s = state(b)
+    check('оглушение: через секунду окно «Заново», игра остановлена (stop)', s['stunShown'] is True and 'stop' in b.eval('window.__sdkLog')[log0:], f"{s['stunShown']}, {b.eval('window.__sdkLog')[log0:]}")
+    check('оглушение: окно «Заново» показано', b.eval("window.__dev.scene.scene.get('UI').stunOverlay.visible") is True)
+    b.screenshot(shots / 'g32-stun.png')
+    b.key('Escape')
+    time.sleep(0.3)
+    check('оглушение: Escape не включает паузу', state(b)['paused'] is False)
+    ui_btn = b.eval("(function(){var b=window.__dev.scene.scene.get('UI').stunBtn.box; return [b.x - b.width/2, b.y - b.height/2, b.width, b.height]})()")
+    click_canvas(b, ui_btn)
+    time.sleep(0.8)
+    s = state(b)
+    check('«Заново»: червь жив, здоровье полное, окно закрыто', s['stunned'] is False and s['hp'] == s['hpMax'] and s['stunShown'] is False, f"{s['stunned']}, {s['hp']}")
+    check('«Заново»: червь под землёй, неуязвимость 2,5 секунды', s['y'] > 0 and s['hpGrace'] > 1.5, f"y={s['y']}, grace={s['hpGrace']}")
+    check('«Заново»: gameplay снова запущен (start)', 'start' in b.eval('window.__sdkLog')[log0:], str(b.eval('window.__sdkLog')[log0:]))
+    check('здоровье: нет ошибок в консоли', not b.errors(), str(b.errors()))
+
+
+def t_zone2_armor(b, shots):
+    """Броня даёт запас здоровья: ступень 3 даёт +75%; покупка в магазине прибавляет здоровье сразу."""
+    zone2_start(b, tier=5, up=(0, 3, 0))
+    s = state(b)
+    check('броня: ступень 3 даёт запас здоровья 175', s['hpMax'] == 175 and s['hp'] == 175, f"{s['hp']}/{s['hpMax']}")
+    b.eval("window.__dev.setUpgrade('hp', 0); 0")
+    # покупка ступени 1: запас 120, здоровье растёт на прибавку
+    b.eval('window.__dev.setHp(70); window.__dev.addCoins(100); 0')
+    b.eval("window.__dev.scene.game.events.emit('upgrade-bought', 'hp', 1); 0")
+    s = state(b)
+    check('броня: покупка ступени 1 даёт запас 120 и лечит на прибавку', s['hpMax'] == 120 and abs(s['hp'] - 90) < 1, f"{s['hp']}/{s['hpMax']}")
+
+
+def t_zone2_hud(b, shots):
+    """Полоса здоровья и окно «Заново» помещаются на экране при любом размере окна; кнопка не меньше 44 CSS-px."""
+    zone2_start(b, tier=6)
+    b.eval('window.__dev.hurt(1000); 0')
+    time.sleep(2.0)
+    for (w, h, dpr, mobile) in ((1280, 720, 1, False), (1920, 1080, 1, False), (844, 390, 3, True), (568, 320, 2, True), (360, 640, 2, True), (320, 568, 2, True), (700, 1400, 1, False)):
+        b.set_viewport(w, h, dpr, mobile)
+        time.sleep(0.8)
+        r = b.eval("""(function(){var ui=window.__dev.scene.scene.get('UI'), u=ui.u, W=ui.scale.width, H=ui.scale.height;
+          function bb(o){var g=o.getBounds(); return [g.x,g.y,g.width,g.height]}
+          var b=ui.stunBtn.box; return {W:W,H:H,u:u,title:bb(ui.stunTitle),btn:[b.x-b.width/2,b.y-b.height/2,b.width,b.height],text:bb(ui.stunBtn.text)}})()""")
+        ok = rect_inside(r['title'], r['W'], r['H']) and rect_inside(r['btn'], r['W'], r['H']) and not rects_overlap(r['title'], r['btn']) and r['btn'][3] / r['u'] >= 44 and rect_inside(r['text'], r['W'], r['H'])
+        check(f'окно «Заново» {w}x{h}: на экране, не накладывается, кнопка от 44 CSS-px', ok, str(r))
+    b.set_viewport(1280, 720, 1, False)
+    check('окно «Заново»: нет ошибок в консоли', not b.errors(), str(b.errors()))
+
+
+def t_zone2_pace(b, shots):
+    """Автопилот на поверхности ест людей и растёт, не залипает под землёй."""
+    zone2_start(b, tier=5)
+    b.eval('window.__dev.autopilot(true); 0')
+    t0 = time.time()
+    g0 = state(b)
+    while time.time() - t0 < 25 and state(b)['tier'] == 5 and state(b)['eaten'] - g0['eaten'] < 15:
+        time.sleep(0.5)
+        if state(b)['stunShown']:
+            b.eval('window.__dev.respawn(); 0')
+    s = state(b)
+    check('поверхность: автопилот за 25 секунд съел не меньше 15 и растёт', s['eaten'] - g0['eaten'] >= 15 or s['tier'] > 5, f"{g0['eaten']} -> {s['eaten']}, тир {s['tier']}")
+    b.eval('window.__dev.autopilot(false); 0')
+    check('поверхность: нет ошибок в консоли', not b.errors(), str(b.errors()))
+
+
+def t_zone2_hints(b, shots):
+    """Подсказки зоны 2: при первом выходе на поверхность и при первой встрече с охраной, по одному разу, сохраняются."""
+    seed_shop(b, coins=0, tier=8, tutorial=3)
+    boot(b, URL, choose=False)
+    far(b, 60)
+    b.eval("window.__dev.freeze(false); window.__dev.scene.worm.heading = -1.5; 0")
+    t0 = time.time()
+    seen = None
+    while time.time() - t0 < 4 and seen != 'hint_surface':
+        time.sleep(0.1)
+        seen = state(b)['toast']
+    check('подсказка: при первом выходе на поверхность «Люди разбегаются…»', seen == 'hint_surface', str(seen))
+    check('подсказка: показана один раз и записана в обучение', save_field(b, 'tutorial') & 32 == 32, str(save_field(b, 'tutorial')))
+    b.eval("window.__dev.freeze(true); 0")
+    place(b, 'patrol', 600)
+    time.sleep(7.0)
+    seen = state(b)['toast']
+    done = save_field(b, 'tutorial') & 64 == 64
+    check('подсказка: при первой встрече с охраной «Осторожно…» (записана в обучение)', done, f"toast={seen}, tutorial={save_field(b, 'tutorial')}")
+    check('подсказки: нет ошибок в консоли', not b.errors(), str(b.errors()))
+
+
 TESTS = {
     'boot': t_boot, 'growth': t_autopilot_growth, 'jump': t_jump, 'wings': t_wings, 'skins': t_skins,
     'sdk': t_sdk, 'lang': t_lang, 'audio': t_audio, 'tiers': t_tiers,
@@ -1446,6 +1671,7 @@ TESTS = {
     'select': t_select, 'selectscreens': t_select_screens, 'coins': t_coins, 'tutorial': t_tutorial,
     'halo': t_halo, 'bg': t_bg, 'juice': t_juice, 'selectsizes': t_select_sizes, 'english': t_english,
     'gear': t_gear, 'shop': t_shop, 'shopguard': t_shop_guard, 'shopsizes': t_shop_sizes, 'challenges': t_challenges, 'shopen': t_shop_english,
+    'z2world': t_zone2_world, 'z2eat': t_zone2_eat, 'z2danger': t_zone2_danger, 'z2armor': t_zone2_armor, 'z2hud': t_zone2_hud, 'z2pace': t_zone2_pace, 'z2hints': t_zone2_hints,
 }
 
 

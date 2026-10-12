@@ -187,6 +187,12 @@
     <div class="z1strip" id="z1strip"></div>
   </section>
 
+  <section class="zone1">
+    <h3>Зона 2 «Поверхность»: люди, машины, техника охраны, дома, декор</h3>
+    <p>Всё стоит на земле и нарисовано в масштабе игры (люди бегут в испуге, два кадра бега; у техники охраны ствол отдельным спрайтом и целится в червя). Люди только взрослые, без крови; техника вымышленная: ни флагов, ни звёзд, ни эмблем, ни номеров; у зданий нет куполов и крестообразных рам. Размер задаёт, с какого тира добыча съедобна: люди с 5-го, машины с 7-го, дома и лёгкая охрана с 8-го, грузовики с 9-го, автобусы с 10-го, многоэтажки с 11-го, тяжёлая техника и башни с 12-го.</p>
+    <canvas class="zone" id="z2"></canvas>
+  </section>
+
   <section id="variants"></section>
 
   <h3>Стайлборд</h3>
@@ -223,6 +229,14 @@
   var Z1_TREASURE = ['treasure-coin', 'treasure-gem', 'treasure-chest-small', 'treasure-chest-big'];
   var Z1_FX = ['fx-star', 'fx-dot', 'fx-tierup-ring', 'fx-glow', 'fx-eat-pop', 'fx-dust-poof', 'fx-dirt-chunk', 'fx-coin-sparkle', 'fx-arrow', 'fx-streak'];
   var GEMS = [['рубин', '#ff6b7d'], ['изумруд', '#57e08a'], ['сапфир', '#58a6ff'], ['аметист', '#c58bff']];
+  var Z2_FILES = {
+    people: ['z2-person-a-run1', 'z2-person-a-run2', 'z2-person-b-run1', 'z2-person-b-run2', 'z2-person-c-run1', 'z2-person-c-run2'],
+    vehicles: ['z2-car-a-red', 'z2-car-a-blue', 'z2-car-a-yellow', 'z2-car-b-green', 'z2-car-b-orange', 'z2-car-b-white', 'z2-bus-yellow', 'z2-bus-blue', 'z2-truck-white', 'z2-truck-orange'],
+    military: ['z2-patrol', 'z2-patrol-barrel', 'z2-heavy', 'z2-heavy-barrel', 'z2-bullet', 'z2-shell'],
+    houses: ['z2-house-a-cream', 'z2-house-a-blue', 'z2-house-b-salmon', 'z2-house-b-sage', 'z2-apartment-beige', 'z2-apartment-pink', 'z2-tower', 'z2-skyscraper'],
+    decor: ['z2-tree-a', 'z2-tree-b', 'z2-bush', 'z2-lamp'],
+    background: ['bg-z2-skyline', 'bg-z2-hills']
+  };
   var FAR_SCALE = 0.86;
   var st = { segs: 8, thick: 1, jaw: 0.53, expr: 'idle', wave: true, prey: true, fit: true, bg: 'ground',
              wings: 0, armor: 0, fins: 0, anchors: false, flap: true, folded: false, pick: null };
@@ -265,6 +279,7 @@
     Z1_BG.forEach(function (n) { list.push([n, zurl(n)]); });
     Z1_TREASURE.forEach(function (n) { list.push([n, turl(n)]); });
     Z1_FX.forEach(function (n) { list.push([n, furl(n)]); });
+    Object.keys(Z2_FILES).forEach(function (dir) { Z2_FILES[dir].forEach(function (n) { list.push([n, '../zone-2-surface/' + dir + '/' + n + '.svg?v=' + BUST]); }); });
     var left = list.length;
     list.forEach(function (it) {
       var im = new Image();
@@ -665,6 +680,60 @@
     ctx.fillText('сцена зоны 1: небо, кромка, три слоя почвы и затемнение глубиной (без параллакса на статичном кадре)', 12, H - 10);
   }
 
+  // Сцена зоны 2: добыча в масштабе игры слева направо на одной земле. Люди бегут, стволы охраны ходят из стороны в сторону.
+  var Z2_ROW = [
+    ['person-a', 1.2], ['person-b', 1.2], ['person-c', 1.2], ['z2-tree-a', 1.3], ['z2-car-a-red', 1.18], ['z2-car-b-green', 1.18], ['z2-lamp', 1.2],
+    ['z2-house-a-cream', 0.95], ['z2-house-b-salmon', 0.95], ['z2-tree-b', 1.2], ['z2-truck-white', 1], ['z2-patrol', 1.2, 'z2-patrol-barrel', [112, 44], [16, 16]],
+    ['z2-bus-yellow', 1], ['z2-apartment-beige', 0.95], ['z2-bush', 1.1], ['z2-heavy', 1.2, 'z2-heavy-barrel', [150, 74], [24, 24]], ['z2-tower', 0.8],
+    ['z2-skyscraper', 0.75], ['z2-car-a-blue', 1.18], ['z2-house-a-blue', 0.95], ['z2-apartment-pink', 0.95], ['z2-car-b-orange', 1.18], ['z2-house-b-sage', 0.95]
+  ];
+  function renderZone2() {
+    var cv = $('z2'); if (!cv) { return; }
+    var c = sizeCanvas(cv), ctx = c.ctx, W = c.w, H = c.h;
+    var bands = [Z2_ROW.slice(0, 12), Z2_ROW.slice(12)], bh = H / bands.length;
+    var wOf = function (it) {
+      var name = it[0].indexOf('person') === 0 ? 'z2-' + it[0] + '-run1' : it[0], im = IMG[name];
+      return im && im.naturalWidth ? im.naturalWidth * it[1] : 160;
+    };
+    bands.forEach(function (row, bi) {
+      var y0 = bi * bh, gy = y0 + bh - 34, total = 0;
+      row.forEach(function (it) { total += wOf(it) + 28; });
+      var k = Math.min(0.78, (W - 40) / total);
+      ctx.save(); ctx.beginPath(); ctx.rect(0, y0, W, bh); ctx.clip();
+      var sky = ctx.createLinearGradient(0, y0, 0, gy); sky.addColorStop(0, '#6FB5FF'); sky.addColorStop(1, '#D9F2FF');
+      ctx.fillStyle = sky; ctx.fillRect(0, y0, W, bh);
+      var layer = function (im, speed) {
+        if (!im || !im.naturalWidth) { return; }
+        var h = im.naturalHeight * k * 1.2, w = im.naturalWidth * k * 1.2;
+        for (var x = -((T * speed) % w); x < W; x += w) { ctx.drawImage(im, x, gy - h + 6, w, h); }
+      };
+      layer(IMG['bg-z2-skyline'], 3); layer(IMG['bg-z2-hills'], 8);
+      ctx.fillStyle = '#5DB85A'; ctx.fillRect(0, gy - 2, W, 6);
+      ctx.fillStyle = '#7A5230'; ctx.fillRect(0, gy + 4, W, bh);
+      var x0 = 20;
+      row.forEach(function (it) {
+        var name = it[0], s = it[1] * k, im, w;
+        if (name.indexOf('person') === 0) { name = 'z2-' + name + '-run' + (Math.floor(T * 7) % 2 + 1); }
+        im = IMG[name];
+        if (!im || !im.naturalWidth) { return; }
+        w = im.naturalWidth * s;
+        var top = gy - (im.naturalHeight - 4) * s;
+        ctx.drawImage(im, x0, top, w, im.naturalHeight * s);
+        if (it[2]) {
+          var b = IMG[it[2]], mx = x0 + it[3][0] * s, my = top + it[3][1] * s, ang = -0.8 + 0.5 * Math.sin(T * 1.3 + x0);
+          if (b && b.naturalWidth) {
+            ctx.save(); ctx.translate(mx, my); ctx.rotate(ang);
+            ctx.drawImage(b, -it[4][0] * s, -it[4][1] * s, b.naturalWidth * s, b.naturalHeight * s); ctx.restore();
+          }
+        }
+        x0 += w + 28 * k;
+      });
+      ctx.restore();
+    });
+    ctx.fillStyle = 'rgba(255,255,255,.9)'; ctx.font = '12px system-ui';
+    ctx.fillText('сцена зоны 2 в масштабе игры (люди бегут, стволы охраны целятся); фон: дальние дома и холмы', 12, H - 8);
+  }
+
   function renderZone1Parts() {
     var host = $('z1layers');
     if (host && !host.children.length) {
@@ -706,7 +775,7 @@
     }
   }
 
-  function renderAll() { renderCards(); renderProg(); renderGearRows(); paintPick(); renderPrey(); renderZone1(); renderZone1Parts(); }
+  function renderAll() { renderCards(); renderProg(); renderGearRows(); paintPick(); renderPrey(); renderZone1(); renderZone1Parts(); renderZone2(); }
 
   // ---------- элементы управления ----------
   $('exprs').innerHTML = EXPRS.map(function (e) { return '<button data-e="' + e[0] + '"' + (e[0] === st.expr ? ' class="on"' : '') + '>' + e[1] + '</button>'; }).join('');
@@ -780,7 +849,7 @@
       if ((st.wings || st.armor || st.fins) && st.flap) { renderStages(); }
       if (st.flap) { renderProg(); }
       tickPrey(1 / 30);
-      renderZone1(); renderZone1Parts();
+      renderZone1(); renderZone1Parts(); renderZone2();
     }
     requestAnimationFrame(tick);
   }

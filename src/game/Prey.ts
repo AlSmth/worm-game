@@ -2,7 +2,6 @@ import Phaser from 'phaser';
 import { WORLD_WIDTH } from '../data/world';
 import { pickRadius } from '../data/prey';
 
-export type PreyLayer = 'soil' | 'surface';
 export type Species = 'beetle' | 'worm';
 
 export interface PreyItem {
@@ -13,7 +12,6 @@ export interface PreyItem {
   y: number;
   /** «Размер» добычи: радиус, который должен поместиться в раскрытые челюсти. */
   r: number;
-  kind: PreyLayer;
   species: Species;
   vx: number;
   baseY: number;
@@ -65,31 +63,22 @@ export class PreySystem {
   constructor(private scene: Phaser.Scene) {}
 
   /** Заполнить область вокруг червя при старте. */
-  populate(wx: number, wy: number, S: number, view: View, surfaceOpen: boolean, tier: number): void {
-    for (let i = 0; i < COUNT; i++) this.spawn(wx, wy, S, view, surfaceOpen, tier, false);
+  populate(wx: number, wy: number, S: number, view: View, tier: number): void {
+    for (let i = 0; i < COUNT; i++) this.spawn(wx, wy, S, view, tier, false);
   }
 
-  update(dt: number, t: number, wx: number, wy: number, S: number, view: View, surfaceOpen: boolean, tier: number, mouthR: number): void {
+  update(dt: number, t: number, wx: number, wy: number, S: number, view: View, tier: number, mouthR: number): void {
     const bound = WORLD_WIDTH / 2 - 300 * S;
     for (const it of this.items) {
       if (it.dying) continue;
       it.phase += dt;
       const k = it.r / BODY_R[it.species];
-      if (it.kind === 'surface') {
-        it.turnIn -= dt;
-        if (it.turnIn <= 0) {
-          it.vx = -it.vx || 30 * S;
-          it.turnIn = 2 + Math.random() * 4;
-        }
-        it.y = -0.22 * it.r;
-      } else {
-        it.turnIn -= dt;
-        if (it.turnIn <= 0) {
-          it.vx = (Math.random() < 0.3 ? -it.vx : it.vx) || 20 * S;
-          it.turnIn = 3 + Math.random() * 6;
-        }
-        it.y = it.baseY + Math.sin(t * 1.4 + it.phase) * 6 * S;
+      it.turnIn -= dt;
+      if (it.turnIn <= 0) {
+        it.vx = (Math.random() < 0.3 ? -it.vx : it.vx) || 20 * S;
+        it.turnIn = 3 + Math.random() * 6;
       }
+      it.y = it.baseY + Math.sin(t * 1.4 + it.phase) * 6 * S;
       const dx = it.vx * dt;
       it.x += dx;
       if (Math.abs(it.x) > bound) {
@@ -124,17 +113,16 @@ export class PreySystem {
     for (let i = this.items.length - 1; i >= 0; i--) {
       const it = this.items[i];
       if (it.dying) continue;
-      if (Math.abs(it.x - wx) > halfW * 1.25 || (it.kind === 'soil' && Math.abs(it.y - wy) > halfH * 1.2)) {
+      if (Math.abs(it.x - wx) > halfW * 1.25 || Math.abs(it.y - wy) > halfH * 1.2) {
         it.img.destroy();
         it.halo.destroy();
         this.items.splice(i, 1);
       }
     }
-    while (this.items.filter((it) => !it.dying).length < COUNT) this.spawn(wx, wy, S, view, surfaceOpen, tier, true);
+    while (this.items.filter((it) => !it.dying).length < COUNT) this.spawn(wx, wy, S, view, tier, true);
   }
 
-  private spawn(wx: number, wy: number, S: number, view: View, surfaceOpen: boolean, tier: number, atEdge: boolean): void {
-    const kind: PreyLayer = surfaceOpen && Math.random() < 0.22 ? 'surface' : 'soil';
+  private spawn(wx: number, wy: number, S: number, view: View, tier: number, atEdge: boolean): void {
     const species: Species = Math.random() < 0.55 ? 'beetle' : 'worm';
     const r = pickRadius(tier, S);
     const bound = WORLD_WIDTH / 2 - 300 * S;
@@ -145,9 +133,8 @@ export class PreySystem {
       const side = Math.random() < 0.5 ? -1 : 1;
       x = atEdge ? wx + side * view.w * (0.6 + Math.random() * 0.4) : wx + (Math.random() * 2 - 1) * view.w * 0.9;
       x = Math.max(-bound, Math.min(bound, x));
-      if (kind === 'soil') y = Math.max(r + 60 * S, wy + (Math.random() * 2 - 0.6) * view.h * 0.9);
-      else y = -0.22 * r;
-      if (kind === 'soil') y = Math.min(y, 1700 * S);
+      y = Math.max(r + 60 * S, wy + (Math.random() * 2 - 0.6) * view.h * 0.9);
+      y = Math.min(y, 1700 * S);
       if (atEdge || Math.hypot(x - wx, y - wy) > START_CLEARANCE * S) break;
     }
     const vx = (Math.random() < 0.5 ? -1 : 1) * (10 + Math.random() * 30) * S;
@@ -166,7 +153,7 @@ export class PreySystem {
       .setBlendMode(Phaser.BlendModes.ADD)
       .setVisible(false);
     this.items.push({
-      img, halo, x, y, r, kind, species, vx, baseY: y, phase: Math.random() * 6, turnIn: 2 + Math.random() * 4,
+      img, halo, x, y, r, species, vx, baseY: y, phase: Math.random() * 6, turnIn: 2 + Math.random() * 4,
       dying: false, step: Math.random() * 0.1, frame: 0, trail: Math.random() * 10,
     });
   }

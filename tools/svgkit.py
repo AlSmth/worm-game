@@ -47,6 +47,12 @@ def svg(size, defs, body):
             f'width="{size}" height="{size}">\n<defs>{"".join(defs)}</defs>\n{body}\n</svg>\n')
 
 
+def svgwh(w, h, defs, body):
+    """Прямоугольный холст w×h."""
+    return (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {w} {h}" '
+            f'width="{w}" height="{h}">\n<defs>{"".join(defs)}</defs>\n{body}\n</svg>\n')
+
+
 def write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding='utf-8', newline='\n')

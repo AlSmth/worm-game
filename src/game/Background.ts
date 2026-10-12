@@ -4,7 +4,8 @@ import { atlasScale } from './assets';
 
 /**
  * Фон зоны 1: небо с облаками, кромка с травой, три слоя почвы с параллаксом, затемнение с глубиной и каменные стены
- * по краям карты. Рисунки лежат в design/zone-1-underground/background. Почва не растёт вместе с червём: по мере роста камера
+ * по краям карты. Рисунки лежат в design/zone-1-underground/background. Над землёй видны дальние дома и холмы зоны 2
+ * (design/zone-2-surface/background): сверху видно, что ждёт червя, когда он вырастет. Почва не растёт вместе с червём: по мере роста камера
  * отъезжает, и земля становится мельче («сначала масштаб земли»). Всё рисуется только в видимой области.
  */
 /** alpha: средний и ближний слои приглушены, чтобы червь и добыча читались на фоне. */
@@ -17,11 +18,19 @@ const EDGE_GROUND = 190; // линия земли на полосе кромки
 const EDGE_HEIGHT = 512;
 const CLOUD_TOP = -820; // верх полосы облаков в мире
 const CLOUD_PARALLAX = 0.15;
+/** Дальние дома и холмы: стоят на земле (низ полосы чуть ниже линии земли, траву рисует кромка), параллакс по слоям. */
+const SKYLINE_H = 512;
+const HILLS_H = 256;
+const SKYLINE_PARALLAX = 0.3;
+const HILLS_PARALLAX = 0.55;
+const GROUND_SINK = 8;
 
 export class WorldBackground {
   private sky: Phaser.GameObjects.Rectangle;
   private horizon: Phaser.GameObjects.Image;
   private clouds: Phaser.GameObjects.TileSprite;
+  private skyline: Phaser.GameObjects.TileSprite;
+  private hills: Phaser.GameObjects.TileSprite;
   private layers: Phaser.GameObjects.TileSprite[] = [];
   private shade: Phaser.GameObjects.Image;
   private deep: Phaser.GameObjects.Rectangle;
@@ -34,6 +43,8 @@ export class WorldBackground {
     this.sky = scene.add.rectangle(0, 0, 10, 10, 0x3f9cff).setOrigin(0, 0).setDepth(-100);
     this.horizon = scene.add.image(0, 0, 'bg-horizon').setOrigin(0, 0).setDepth(-99);
     this.clouds = scene.add.tileSprite(0, 0, 10, 256, 'bg-z1-clouds').setOrigin(0, 0).setDepth(-98.8);
+    this.skyline = scene.add.tileSprite(0, 0, 10, SKYLINE_H, 'bg-z2-skyline').setOrigin(0, 0).setDepth(-98.6);
+    this.hills = scene.add.tileSprite(0, 0, 10, HILLS_H, 'bg-z2-hills').setOrigin(0, 0).setDepth(-98.4);
     for (const l of LAYERS) this.layers.push(scene.add.tileSprite(0, 0, 10, 10, l.key).setOrigin(0, 0).setDepth(l.depth).setAlpha(l.alpha));
     this.shade = scene.add.image(0, 0, 'bg-depth').setOrigin(0, 0).setDepth(-96.5);
     this.deep = scene.add.rectangle(0, 0, 10, 10, 0x120806, 0.9).setOrigin(0, 0).setDepth(-96.5);
@@ -69,6 +80,22 @@ export class WorldBackground {
     if (this.clouds.visible) {
       this.clouds.setPosition(left, cloudTop).setSize(width, cloudH).setTileScale(cs, cs);
       this.clouds.tilePositionX = (left * CLOUD_PARALLAX) / cs;
+    }
+
+    // дальние дома и холмы над землёй
+    const sk = 1 / atlasScale('bg-z2-skyline');
+    const skTop = GROUND_SINK - SKYLINE_H * sk;
+    this.skyline.setVisible(bottom > skTop && top < GROUND_SINK);
+    if (this.skyline.visible) {
+      this.skyline.setPosition(left, skTop).setSize(width, SKYLINE_H * sk).setTileScale(sk, sk);
+      this.skyline.tilePositionX = (left * SKYLINE_PARALLAX) / sk;
+    }
+    const hk = 1 / atlasScale('bg-z2-hills');
+    const hTop = GROUND_SINK - HILLS_H * hk;
+    this.hills.setVisible(bottom > hTop && top < GROUND_SINK);
+    if (this.hills.visible) {
+      this.hills.setPosition(left, hTop).setSize(width, HILLS_H * hk).setTileScale(hk, hk);
+      this.hills.tilePositionX = (left * HILLS_PARALLAX) / hk;
     }
 
     // слои почвы под землёй: рисунок в px мира (масштаб 1), параллакс по слоям
