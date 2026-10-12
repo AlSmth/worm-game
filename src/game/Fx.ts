@@ -98,6 +98,31 @@ export class Fx {
     });
   }
 
+  /**
+   * Взрыв ракеты: четыре кадра подряд (вспышка, огненный шар, шар с дымом, рассеивание), растёт и гаснет. size — диаметр шара в px мира.
+   * Без текста и крови (п. 3.4.3). Не масштабируется червём: размер задаёт ракета.
+   */
+  boom(x: number, y: number, size: number): void {
+    const k = size / this.frameWidth('fx-boom-1');
+    const img = this.scene.add
+      .image(x, y, 'fx', 'fx-boom-1')
+      .setDepth(512)
+      .setScale(k * 0.4)
+      .setRotation((Math.random() - 0.5) * 0.8);
+    const st = { p: 0 };
+    this.scene.tweens.add({
+      targets: st,
+      p: 1,
+      duration: 520,
+      ease: 'Cubic.easeOut',
+      onUpdate: () => {
+        const f = Math.min(3, Math.floor(st.p * 4));
+        img.setFrame(`fx-boom-${f + 1}`).setScale(k * (0.4 + 0.75 * st.p)).setAlpha(f === 3 ? 1 - (st.p * 4 - 3) * 0.9 : 1);
+      },
+      onComplete: () => img.destroy(),
+    });
+  }
+
   /** Линия скорости: тонкий штрих вдоль движения, остаётся на месте и гаснет (след за быстрым червём). */
   streak(x: number, y: number, angle: number, S: number, color = 0xffffff): void {
     const k = (150 * S) / this.frameWidth('fx-streak');

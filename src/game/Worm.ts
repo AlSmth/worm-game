@@ -2,8 +2,8 @@ import Phaser from 'phaser';
 import rig from '../../design/worm/rig.json';
 import gear from '../../design/upgrades/gear.json';
 import { skinInfo, type SkinId } from '../data/skins';
-import { JUMP_BONUS, SPEED_BONUS, WINGS_CANVAS, type Upgrades } from '../data/upgrades';
-import { SWIM_SPEED, WORLD_WIDTH } from '../data/world';
+import { JUMP_BONUS, SPEED_BONUS, WING_CEIL, WING_CLIMB, WING_DIVE, WING_SINK, WING_UP, WING_STEER, WING_VMAX, WINGS_CANVAS, type Upgrades } from '../data/upgrades';
+import { SWIM_SPEED, worldHalf } from '../data/world';
 import { atlasScale } from './assets';
 
 export type Expr = 'idle' | 'open' | 'chomp' | 'hurt' | 'happy';
@@ -147,6 +147,11 @@ export class Worm {
   private facing = 1;
   private flapPhase = 0;
   private wingOpen = 0;
+  /** Сила взмахов в воздухе 0…1 (сглаживается) и режим пикирования: управляют видом крыльев. */
+  private flapK = 0;
+  private diving = false;
+  /** Намерение игрока по вертикали в воздухе, −1 вниз … +1 вверх (для проверок). */
+  lift = 0;
   private jawOpen: number = JAW_BY_EXPR.idle;
   private nodes: Node[] = [];
   private radii: number[] = [];
@@ -251,8 +256,8 @@ export class Worm {
     return {
       armor: this.armorLevel,
       fins: this.finLevel,
-      plates: this.plates.filter((i) => i.visible).length,
-      finSegs: this.finSegs.filter((i) => i.visible).length,
+      plates: this.plates.length,
+      finSegs: this.finSegs.length,
       head: !!this.headGear,
       hornBack: !!this.hornBack,
       tail: !!this.tailFin,
@@ -370,7 +375,7 @@ export class Worm {
   private move(dt: number, steer: Steer): void {
     const S = this.scale;
     const swim = this.stunned ? 0 : this.swimSpeed;
-    const half = WORLD_WIDTH / 2 - this.headRadius * 1.4;
+    const half = worldHalf(S) - this.headRadius * 1.4;
     if (!this.inAir) {
       let want: number | null = null;
       if (this.stunned) {
@@ -427,12 +432,53 @@ export class Worm {
         this.onExit?.();
       }
     } else {
-      this.vy += GRAVITY * S * dt;
+      const wl = this.stunned ? 0 : this.upgrades.jump;
+      const g = GRAVITY * S;
       let ax = 0;
-      if (steer.mode === 'target') ax = Math.sign(steer.tx - this.x) * AIR_CONTROL * S;
-      else if (steer.mode === 'dir') ax = steer.dx * AIR_CONTROL * S;
+      if (wl === 0) {
+        // без крыльев: баллистика, лёгкая подруливающая тяга
+        this.vy += g * dt;
+        if (steer.mode === 'target') ax = Math.sign(steer.tx - this.x) * AIR_CONTROL * S;
+        else if (steer.mode === 'dir') ax = steer.dx * AIR_CONTROL * S;
+        this.lift = 0;
+        this.flapK = 0;
+        this.diving = false;
+      } else {
+        // крылья: намерение по вертикали (вверх +1, вровень 0, вниз −1) и по горизонтали (пропорционально, без дрожи у цели)
+        let want = -0.12;
+        let hx = 0;
+        if (steer.mode === 'target') {
+          want = Math.max(-1, Math.min(1, (this.y - steer.ty) / (this.headRadius * 5)));
+          hx = Math.max(-1, Math.min(1, (steer.tx - this.x) / (this.headRadius * 4)));
+        } else if (steer.mode === 'dir') {
+          want = -steer.dy;
+          hx = steer.dx;
+        }
+        this.lift = want;
+        this.diving = want < -0.35;
+        // чистое ускорение вниз в долях g: парение (WING_SINK), «вверх» (WING_UP) или пикирование (WING_DIVE)
+        let a: number;
+        if (want >= 0) a = WING_SINK[wl] + (WING_UP[wl] - WING_SINK[wl]) * want;
+        else a = WING_SINK[wl] + (WING_DIVE - WING_SINK[wl]) * Math.min(1, -want);
+        if (a < 0) {
+          // у потолка подъём затухает, выше потолка тяжесть возвращается: червь «упирается» в разреженный воздух
+          const ceil = WING_CEIL[wl] * S;
+          const room = ceil > 0 ? Math.max(0, Math.min(1, (ceil + this.y) / (ceil * 0.3))) : 0;
+          a = a * room + 0.8 * (1 - room);
+        }
+        this.vy += g * a * dt;
+        // сопротивление воздуха: с крыльями падение не разгоняется, а лишняя скорость вверх гаснет (на пикировании его нет)
+        this.vy -= this.vy * Math.min(1, 1.6 * dt) * (1 - Math.min(1, Math.abs(a) / WING_DIVE));
+        const climb = swim * WING_CLIMB[wl];
+        if (this.vy < -climb) this.vy = -climb;
+        ax = hx * AIR_CONTROL * S * WING_STEER[wl];
+        if (steer.mode === 'none') this.vx -= this.vx * Math.min(1, 0.7 * dt);
+        // сила взмахов: вверх — частые, вровень — спокойные, на пикировании крылья сложены
+        const target = this.diving ? 0 : WING_SINK[wl] === 0 ? 0.35 + 0.65 * Math.max(0, want) : Math.max(0.15, want);
+        this.flapK += (target - this.flapK) * Math.min(1, 6 * dt);
+      }
       this.vx += ax * dt;
-      const maxVx = swim * 2.2;
+      const maxVx = swim * (wl === 0 ? 2.2 : WING_VMAX[wl]);
       this.vx = Math.max(-maxVx, Math.min(maxVx, this.vx));
       this.x += this.vx * dt;
       this.y += this.vy * dt;
@@ -443,7 +489,11 @@ export class Worm {
         this.x = half;
         this.vx = Math.min(0, this.vx);
       }
-      this.heading = Math.atan2(this.vy, this.vx);
+      if (wl === 0 || Math.hypot(this.vx, this.vy) > 0.25 * swim) {
+        const want = Math.atan2(this.vy, this.vx);
+        // с крыльями курс поворачивается плавно: висящий червь не вертится вслед за мелкими движениями
+        this.heading = wl === 0 ? want : this.heading + angleDiff(want, this.heading) * Math.min(1, 9 * dt);
+      }
       if (this.y >= 0 && this.vy > 0) {
         this.inAir = false;
         this.speed = Math.hypot(this.vx, this.vy);
@@ -616,10 +666,11 @@ export class Worm {
       const ax = n.x + ox * cn - oy * sn;
       const ay = n.y + ox * sn + oy * cn;
       const k = S / atlasScale('wings');
-      this.flapPhase += dt * (this.inAir ? 16 : this.showOff ? 9 : 6);
-      const amp = this.inAir || this.showOff ? 0.38 : 0.14;
-      // под землёй крылья прижаты к спине и меньше, в воздухе раскрываются
-      this.wingOpen += ((this.inAir || this.showOff ? 1 : 0) - this.wingOpen) * Math.min(1, 7 * dt);
+      this.flapPhase += dt * (this.inAir ? 7 + 15 * this.flapK : this.showOff ? 9 : 6);
+      const amp = this.inAir ? 0.14 + 0.4 * this.flapK : this.showOff ? 0.38 : 0.14;
+      // под землёй крылья прижаты к спине и меньше, в воздухе раскрываются (на пикировании складываются наполовину)
+      const openT = this.inAir ? (this.diving ? 0.5 : 1) : this.showOff ? 1 : 0;
+      this.wingOpen += (openT - this.wingOpen) * Math.min(1, 7 * dt);
       const fold = 1 - this.wingOpen;
       const foldRot = -0.85 * fold * nFace;
       const kk = k * (1 - 0.4 * fold);

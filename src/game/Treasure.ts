@@ -1,7 +1,6 @@
 import Phaser from 'phaser';
-import { WORLD_WIDTH } from '../data/world';
+import { worldHalf } from '../data/world';
 import { GEM_TINTS, TREASURE_COUNT, availableAt, scaledRadius, type TreasureSpec } from '../data/treasure';
-import { sizeScale } from '../data/prey';
 import type { View } from './Prey';
 
 export interface TreasureItem {
@@ -28,6 +27,8 @@ const HALO_COLOR = 0xffd23f;
  */
 export class TreasureSystem {
   items: TreasureItem[] = [];
+  /** Во сколько раз ценность выросла с тиром (econScale): ставит сцена. */
+  econ = 1;
 
   constructor(
     private scene: Phaser.Scene,
@@ -53,7 +54,7 @@ export class TreasureSystem {
           it.img.setScale(it.baseScale * (1 + 0.06 * Math.sin(p * 3))).setRotation(0.1 * Math.sin(p * 2));
           break;
         default:
-          it.img.setY(it.y + Math.sin(p * 2) * 3 * sizeScale(S));
+          it.img.setY(it.y + Math.sin(p * 2) * 3);
       }
       const edible = this.isEdible(it, mouthR);
       it.halo.setAlpha(edible ? 0.34 + 0.12 * Math.sin(t * 4 + it.phase) : 0.1);
@@ -81,7 +82,7 @@ export class TreasureSystem {
 
   /** Выбрать сокровище по глубине; false, если на этой высоте ничего не положено (у самой поверхности). */
   private spawn(wx: number, wy: number, S: number, view: View, atEdge: boolean): boolean {
-    const bound = WORLD_WIDTH / 2 - 300 * S;
+    const bound = worldHalf(S) - 300 * S;
     const minY = 130 * Math.max(1, S * 0.6);
     const maxY = 1700 * S;
     const side = Math.random() < 0.5 ? -1 : 1;
@@ -101,7 +102,7 @@ export class TreasureSystem {
     }
     let value = spec.value;
     let tint = 0xffffff;
-    const worth = (v: number) => Math.max(1, Math.round(v * Math.max(1, S)));
+    const worth = (v: number) => Math.max(1, Math.round(v * this.econ));
     if (spec.kind === 'gem') {
       const total = GEM_TINTS.reduce((a, g) => a + g.weight, 0);
       let g = Math.random() * total;
@@ -111,9 +112,8 @@ export class TreasureSystem {
     }
     // ценность сокровища растёт вместе с миром: чем крупнее червь, тем богаче находки (цены в магазине рассчитаны на это)
     value = worth(value);
-    const k = sizeScale(S);
-    const baseScale = spec.look * k;
-    const r = scaledRadius(spec, S);
+    const baseScale = spec.look;
+    const r = scaledRadius(spec);
     const img = this.scene.add.image(x, y, 'treasure', spec.frame).setScale(baseScale).setDepth(-49).setTint(tint);
     const halo = this.scene.add
       .image(x, y, 'fx', 'fx-glow')

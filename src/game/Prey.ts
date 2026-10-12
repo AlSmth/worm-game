@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { WORLD_WIDTH } from '../data/world';
+import { worldHalf } from '../data/world';
 import { pickRadius } from '../data/prey';
 
 export type Species = 'beetle' | 'worm';
@@ -68,7 +68,7 @@ export class PreySystem {
   }
 
   update(dt: number, t: number, wx: number, wy: number, S: number, view: View, tier: number, mouthR: number): void {
-    const bound = WORLD_WIDTH / 2 - 300 * S;
+    const bound = worldHalf(S) - 300 * S;
     for (const it of this.items) {
       if (it.dying) continue;
       it.phase += dt;
@@ -124,8 +124,8 @@ export class PreySystem {
 
   private spawn(wx: number, wy: number, S: number, view: View, tier: number, atEdge: boolean): void {
     const species: Species = Math.random() < 0.55 ? 'beetle' : 'worm';
-    const r = pickRadius(tier, S);
-    const bound = WORLD_WIDTH / 2 - 300 * S;
+    const r = pickRadius(tier);
+    const bound = worldHalf(S) - 300 * S;
     let x = wx;
     let y = wy;
     // При начальной расстановке вокруг червя остаётся свободная зона: первая добыча достаётся игроку, а не появляется во рту.

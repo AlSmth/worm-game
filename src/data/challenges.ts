@@ -1,5 +1,5 @@
 import type { TextKey } from '../core/i18n';
-import { MAX_TIER, wormScale } from './growth';
+import { MAX_TIER, econScale } from './growth';
 import { SURFACE_TIER } from './world';
 
 /**
@@ -25,7 +25,7 @@ interface Def {
   base: number;
   /** Рост цели за тир (доля от базовой). */
   step: number;
-  /** Награда на 1-м тире; дальше растёт вместе с масштабом червя, как ценность сокровищ. */
+  /** Награда на 1-м тире; дальше растёт вместе с тиром (econScale), как ценность сокровищ. */
   reward: number;
   /** С какого тира предлагается (самоцветы лежат глубже, прыжок нужен поверхности). */
   minTier: number;
@@ -68,7 +68,7 @@ export function challengeKey(kind: ChallengeKind): TextKey {
 export function makeChallenge(kind: ChallengeKind, tier: number): ChallengeState {
   const d = defOf(kind);
   const n = kind === 'tier' ? Math.min(MAX_TIER, tier + 2) : Math.max(1, Math.round(d.base * (1 + d.step * (tier - 1))));
-  const r = Math.max(5, Math.round(d.reward * wormScale(tier)));
+  const r = Math.max(5, Math.round(d.reward * econScale(tier)));
   return { k: kind, n, p: 0, r };
 }
 

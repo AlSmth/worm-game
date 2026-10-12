@@ -6,7 +6,7 @@
 Пишет в design/zone-2-surface/:
   people/     z2-person-<вид>-run1|run2   взрослые мультяшные люди, два кадра бега (96×96, ноги на нижнем краю)
   vehicles/   z2-car-a|b-<цвет>, z2-bus-<цвет>, z2-truck-<цвет>   гражданские машины (колёса на нижнем краю)
-  military/   z2-patrol, z2-patrol-barrel, z2-heavy, z2-heavy-barrel, z2-bullet, z2-shell   вымышленная техника охраны
+  military/   z2-patrol, z2-patrol-barrel, z2-heavy, z2-heavy-barrel, z2-launcher, z2-launcher-rack, z2-rocket, z2-flame-1..3   вымышленная техника охраны и ракета
               (папка названа по ТЗ; в игре и текстах слова «армия», «война», «бой» не используются: пп. 3.4.4, R1)
   decor/      z2-tree-a|b, z2-bush, z2-lamp
   houses/     z2-house-a|b-<цвет>, z2-apartment-<цвет>, z2-tower, z2-skyscraper   (код gen_zone2_city.py)
@@ -245,17 +245,78 @@ def heavy():
     return sprite(W, H, defs, parts)
 
 
-def bullet():
-    d = []
-    g = lg(d, '#FFE27A', '#FF9A2E')
-    return sprite(32, 32, d, [circ(16, 16, 10, g, OUT_S + 0.4), hi(11, 10, 7, 5, op=0.7)])
+def rocket():
+    """Ракета для охраны, смотрит вправо: белый корпус с красной полосой, носовой конус, оперение. Длина около 98 px, хвост на x = 24."""
+    W, H = 128, 40
+    defs = []
+    body = lg(defs, '#FFFFFF', '#C9CED8')
+    cone = lg(defs, '#FF8A7A', '#D8402F')
+    fin = lg(defs, '#E9503F', '#A82A22')
+    parts = [
+        path('M 28 20 L 14 6 L 36 12 Z', fin, 3.0),
+        path('M 28 20 L 14 34 L 36 28 Z', fin, 3.0),
+        rr(24, 12, 62, 16, 5, body, 3.2),
+        path('M 82 12 Q 112 12 124 20 Q 112 28 82 28 Z', cone, 3.2),
+        rr(52, 12, 12, 16, 0, '#E9503F', 0),
+        line(52, 12, 52, 28, OUTLINE, 2.4), line(64, 12, 64, 28, OUTLINE, 2.4),
+        hi(30, 14, 50, 4, op=0.6),
+    ]
+    return sprite(W, H, defs, parts)
 
 
-def shell():
-    d = []
-    g = lg(d, '#7C8497', '#3A3F4F')
-    return sprite(48, 48, d, [circ(24, 24, 15, g, OUT), path('M 12 24 Q 24 16 36 24', 'none', 4.5, 'stroke-opacity="0"'),
-                              f'<path d="M 11 27 Q 24 36 37 27" fill="none" stroke="#F28A2E" stroke-width="5"/>', hi(15, 13, 10, 6, op=0.5)])
+def flame(variant):
+    """Пламя из сопла (три кадра мерцания), хвост пламени влево, сопло у правого края холста."""
+    W, H = 72, 36
+    defs = []
+    lens = (50, 62, 56)
+    tips = (-3, 2, 0)
+    L = lens[variant]
+    cy = H / 2
+    out = (f'M 70 {cy - 7} Q {70 - L * 0.55} {cy - 11 + tips[variant]} {70 - L} {cy + tips[variant] * 2} '
+           f'Q {70 - L * 0.55} {cy + 11 + tips[variant]} 70 {cy + 7} Z')
+    mid = (f'M 70 {cy - 4.5} Q {70 - L * 0.4} {cy - 7} {70 - L * 0.66} {cy + tips[variant]} '
+           f'Q {70 - L * 0.4} {cy + 7} 70 {cy + 4.5} Z')
+    core = f'M 70 {cy - 2.4} Q {70 - L * 0.22} {cy - 3.5} {70 - L * 0.36} {cy} Q {70 - L * 0.22} {cy + 3.5} 70 {cy + 2.4} Z'
+    parts = [f'<path d="{out}" fill="#FF7A1A" stroke="#B8380C" stroke-width="2.2"/>',
+             f'<path d="{mid}" fill="#FFD23F"/>', f'<path d="{core}" fill="#FFFFFF"/>']
+    return sprite(W, H, defs, parts)
+
+
+def launcher():
+    """Ракетная установка охраны: стальной грузовик с площадкой для пусковой стойки (крепление в (110, 56))."""
+    W, H = 288, 160
+    gy = H - PAD
+    defs = []
+    steel = fillg(defs, '#8C9BB3')
+    dark = fillg(defs, '#5E6C86', 0.1, 0.25)
+    orange = fillg(defs, '#F28A2E')
+    parts = [rr(8, 62, 190, 56, 8, dark, OUT)]                                   # платформа
+    parts.append(rr(14, 98, 180, 12, 4, orange, 2.6))
+    parts.append(circ(110, 62, 16, '#3A3F4F', OUT_S))                           # узел стойки
+    parts.append(rr(196, 72, 80, 50, 12, steel, OUT))                            # кабина
+    parts.append(poly([(204, 74), (222, 46), (262, 46), (270, 74)], steel, OUT))
+    parts.append(glass(defs, 226, 52, 32, 20, r=4))
+    parts.append(rr(10, 112, 264, 14, 5, '#4B4F61', 2.6))
+    parts.append(rr(262, 96, 12, 12, 4, '#FFF2A8', 2.6))
+    parts.append(hi(14, 66, 176, 6, op=0.35))
+    for cx in (52, 128, 232):
+        parts.append(wheel(cx, gy - 20, 20))
+    return sprite(W, H, defs, parts)
+
+
+def launcher_rack():
+    """Пусковая стойка: три трубы друг над другом с носами ракет; ось вращения слева (16, 32), смотрит вправо."""
+    W, H = 144, 64
+    defs = []
+    g = fillg(defs, '#B7C2D6', 0.3, 0.3)
+    parts = []
+    for i, y in enumerate((8, 24, 40)):
+        parts.append(rr(16, y, 112, 16, 6, g, OUT_S + 0.4))
+        parts.append(path(f'M 118 {y + 3} Q 134 {y + 8} 118 {y + 13} Z', '#E9503F', 2.2))
+        parts.append(hi(24, y + 2, 84, 3, op=0.5))
+    parts.append(rr(10, 6, 14, 52, 5, '#5E6C86', OUT_S + 0.4))
+    parts.append(circ(16, 32, 9, '#3A3F4F', OUT_S))
+    return sprite(W, H, defs, parts)
 
 
 # ---------------------------------------------------------------- декор
@@ -325,9 +386,12 @@ def main():
     _w(Z2 / 'military' / 'z2-patrol-barrel.svg', barrel(70, 14, 16, 96, 32, '#8CE0DA', '#2A8C86'))
     _w(Z2 / 'military' / 'z2-heavy.svg', heavy())
     _w(Z2 / 'military' / 'z2-heavy-barrel.svg', barrel(138, 22, 24, 176, 48, '#B7C2D6', '#5E6C86'))
-    _w(Z2 / 'military' / 'z2-bullet.svg', bullet())
-    _w(Z2 / 'military' / 'z2-shell.svg', shell())
-    n += 6
+    _w(Z2 / 'military' / 'z2-rocket.svg', rocket())
+    for i in range(3):
+        _w(Z2 / 'military' / f'z2-flame-{i + 1}.svg', flame(i))
+    _w(Z2 / 'military' / 'z2-launcher.svg', launcher())
+    _w(Z2 / 'military' / 'z2-launcher-rack.svg', launcher_rack())
+    n += 10
     for kind in ('a', 'b'):
         _w(Z2 / 'decor' / f'z2-tree-{kind}.svg', tree(kind))
         n += 1

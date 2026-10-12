@@ -34,6 +34,7 @@ export const TUTORIAL_SHOP_OPENED = 8; // магазин уже открывал
 export const TUTORIAL_CH_SEEN = 16; // вкладку испытаний уже открывали (красная точка на вкладке гаснет)
 export const TUTORIAL_SURFACE = 32; // подсказка при первом выходе на поверхность показана
 export const TUTORIAL_GUARD = 64; // подсказка про технику охраны показана
+export const TUTORIAL_WINGS = 128; // подсказка про полёт на крыльях показана
 
 export function defaultSave(): SaveData {
   return { v: 3, savedAt: 0, skin: DEFAULT_SKIN, skinChosen: false, tier: 1, growth: 0, coins: 0, up: { jump: 0, hp: 0, speed: 0 }, sound: true, tutorial: 0, ch: [] };

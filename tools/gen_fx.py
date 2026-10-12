@@ -106,11 +106,33 @@ def fx_streak():
             '<path d="M 0 12 Q 40 6 120 7 Q 128 7 128 12 Q 128 17 120 17 Q 40 18 0 12 Z" fill="url(#fx-streak-g)"/>\n</svg>\n')
 
 
+def fx_boom(frame):
+    """Мультяшный взрыв без текста, 4 кадра: вспышка, огненный шар, шар с дымом, рассеивание. Игра проигрывает их подряд."""
+    n = 14
+    cfg = [(36, 0.55, '#FFFFFF', '#FFF27A'), (56, 0.62, '#FFF27A', '#FF9A2E'), (62, 0.7, '#FFB347', '#E0541F'), (60, 0.78, '#B7A99C', '#6E6258')][frame]
+    R, inner, c1, c2 = cfg
+    pts = []
+    for i in range(n * 2):
+        r = R if i % 2 == 0 else R * inner
+        a = -math.pi / 2 + math.pi * i / n + (0.07 if i % 4 == 0 else 0)
+        pts.append((64 + r * math.cos(a), 64 + r * math.sin(a)))
+    d = 'M ' + ' L '.join(f'{x:.1f} {y:.1f}' for x, y in pts) + ' Z'
+    defs = [rgrad(f'boom{frame}-g', [(0, c1), (1, c2)])]
+    art = f'<path d="{d}" fill="url(#boom{frame}-g)" stroke="{OUTLINE}" stroke-width="4.2" stroke-linejoin="round"/>'
+    if frame < 3:
+        art += f'<circle cx="64" cy="64" r="{R * 0.32:.1f}" fill="#FFFFFF" fill-opacity="{0.9 - 0.2 * frame:.2f}"/>'
+    else:
+        for (cx, cy, r) in ((40, 46, 14), (88, 52, 12), (60, 86, 16), (92, 88, 9), (34, 82, 9)):
+            art += f'<circle cx="{cx}" cy="{cy}" r="{r}" fill="#CFC6BC" fill-opacity=".85" stroke="{OUTLINE}" stroke-width="3"/>'
+    return svg(128, defs, art)
+
+
 def main():
     items = {
         'fx-star': fx_star(), 'fx-dot': fx_dot(), 'fx-tierup-ring': fx_ring(), 'fx-glow': fx_glow(),
         'fx-eat-pop': fx_eat_pop(), 'fx-dust-poof': fx_dust_poof(), 'fx-dirt-chunk': fx_dirt_chunk(),
         'fx-coin-sparkle': fx_coin_sparkle(), 'fx-arrow': fx_arrow(), 'fx-streak': fx_streak(),
+        'fx-boom-1': fx_boom(0), 'fx-boom-2': fx_boom(1), 'fx-boom-3': fx_boom(2), 'fx-boom-4': fx_boom(3),
     }
     for name, text in items.items():
         write(OUT_DIR / f'{name}.svg', text)

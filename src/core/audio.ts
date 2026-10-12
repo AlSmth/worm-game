@@ -3,7 +3,7 @@
  * чтобы не появлялся системный плеер; заодно нет файлов и вопросов лицензии).
  */
 
-export type SfxName = 'eat' | 'chomp' | 'grow' | 'jump' | 'splash' | 'ui' | 'coin' | 'gem' | 'chest' | 'select' | 'bump' | 'buy' | 'quest' | 'hit' | 'shoot' | 'stun';
+export type SfxName = 'eat' | 'chomp' | 'grow' | 'jump' | 'splash' | 'ui' | 'coin' | 'gem' | 'chest' | 'select' | 'bump' | 'buy' | 'quest' | 'hit' | 'shoot' | 'stun' | 'boom' | 'launch';
 
 type AudioCtor = typeof AudioContext;
 
@@ -162,6 +162,17 @@ class Sfx {
       case 'shoot':
         this.burst(0.08, 2400, 500, 0.18);
         this.tone(420, 0.1, 'sawtooth', 0.1, 140);
+        break;
+      case 'launch':
+        // пуск ракеты: шипящий разгон вверх и глухой хлопок
+        this.burst(0.32, 500, 3200, 0.22);
+        this.tone(150, 0.2, 'sawtooth', 0.1, 480);
+        break;
+      case 'boom':
+        // взрыв: низкий удар и шум, затухающий вниз
+        this.burst(0.42, 1400, 70, 0.5);
+        this.tone(110, 0.36, 'sine', 0.42, 38);
+        this.tone(70, 0.3, 'square', 0.12, 30, 0.02);
         break;
       case 'stun':
         [523, 440, 349, 262].forEach((f, i) => this.tone(f, 0.18, 'triangle', 0.28, undefined, i * 0.13));

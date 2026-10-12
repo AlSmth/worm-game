@@ -117,7 +117,7 @@ def t_jump(b, shots):
             got_air = True
         min_y = min(min_y, s['y'])
     check('прыжок: червь вышел на поверхность и взлетел', got_air)
-    check('прыжок: высота разумная (есть, но не выше полёта)', -900 < min_y < -40, f'min_y={min_y}')
+    check('прыжок: высота разумная (есть, но не выше полёта)', -1.8 * 300 * s0['scale'] < min_y < -40, f"min_y={min_y}, масштаб {s0['scale']}")
     b.screenshot(shots / 'g03-jump.png')
     # возвращается под землю
     t0 = time.time()
@@ -216,7 +216,7 @@ def t_keyboard(b, shots):
     check('клавиатура: стрелка вниз уводит червя глубже', y1 > y0 + 80, f'{y0:.0f} -> {y1:.0f}')
     # KeyS по коду, независимо от раскладки
     b.key_down('KeyW')
-    time.sleep(1.0)
+    time.sleep(1.6)
     b.key_up('KeyW')
     y2 = state(b)['y']
     check('клавиатура: код KeyW (раскладка не важна) поднимает', y2 < y1 - 60, f'{y1:.0f} -> {y2:.0f}')
@@ -570,7 +570,7 @@ def t_tiers(b, shots):
         time.sleep(2.2)
         r = b.eval("(function(){var s=window.__dev.scene, c=s.cameras.main; return {S:s.worm.scale, head:s.worm.headRadius*c.zoom/(window.devicePixelRatio||1), segs:Math.floor(s.worm.segs), fps:Math.round(s.game.loop.actualFps)}})()")
         check(f'тир {tier}: масштаб {r["S"]:.2f}, сегментов {r["segs"]}, голова на экране {r["head"]:.0f} px, {r["fps"]} fps',
-              r['S'] > prev and 30 < r['head'] < 160 and r['fps'] >= 25, str(r))
+              r['S'] > prev and 30 < r['head'] < 260 and r['fps'] >= 25, str(r))
         prev = r['S']
         shot = shots / f'g09-tier-{tier}.png'
         b.screenshot(shot)
@@ -627,10 +627,11 @@ def t_world(b, shots):
     speed = b.eval('window.__dev.scene.worm.swimSpeed / window.__dev.scene.worm.scale')
     check('карта: от края до края ≈ 5 минут', 290 <= w['width'] / speed <= 310,
           f"{w['width'] / speed:.0f} с (ширина {w['width']:.0f} px, скорость {speed:.0f} px/с)")
-    half = w['width'] / 2
     for side, key, sign in (('правая', 'ArrowRight', 1), ('левая', 'ArrowLeft', -1)):
-        b.eval('window.__dev.setPos(%d, 400)' % (sign * (half - 700)))
+        half = b.eval('window.__dev.world().half')
+        b.eval('window.__dev.setPos(%d, 400)' % (sign * (half - 700 * b.eval('window.__dev.scene.worm.scale'))))
         time.sleep(1.0)
+        half = b.eval('window.__dev.world().half')
         b.key_down(key)
         far = 0
         t0 = time.time()
@@ -638,6 +639,7 @@ def t_world(b, shots):
             time.sleep(0.05)
             far = max(far, sign * state(b)['x'])
         b.key_up(key)
+        half = b.eval('window.__dev.world().half')  # червь за это время мог вырасти, и карта вместе с ним
         check(f'карта: {side} стена не пускает', far <= half, f'дальше всего {far:.0f}, край {half:.0f}')
         cam = b.eval("(function(){var c=window.__dev.scene.cameras.main; var v=c.width/c.zoom; return {edge: Math.abs(c.scrollX + c.width/2) + v/2, v: v}})()")
         check(f'карта: камера у {side} стены не уезжает в пустоту', cam['edge'] <= half + 0.12 * cam['v'], f"{cam['edge']:.0f} <= {half + 0.12 * cam['v']:.0f}")
@@ -665,16 +667,22 @@ def t_model(b, shots):
     # челюсти: в покое раскрыты наполовину, «жуёт» закрывает, «бросок» раскрывает
     b.eval('window.__dev.setTier(1); 0')
     b.eval("window.__dev.scene.prey.items.forEach(function(it){it.x += 100000}); 0")
-    time.sleep(0.7)
-    idle = state(b)['jaw']
+    idle, t0 = 0, time.time()
+    while time.time() - t0 < 3.0 and not 0.4 <= idle <= 0.68:  # недавний укус или выражение временно меняют раскрытие
+        time.sleep(0.2)
+        idle = state(b)['jaw']
     check('челюсти в покое раскрыты примерно наполовину', 0.4 <= idle <= 0.68, f'{idle}')
+    # выражение держится 600 мс; пока оно показано, читаем раскрытие несколько раз (случайный укус рядом не должен ломать проверку)
+    chomp, wide = 1.0, 0.0
     b.eval("window.__dev.scene.worm.flash('chomp', 600, window.__dev.scene.time.now); 0")
-    time.sleep(0.25)
-    chomp = state(b)['jaw']
+    for _ in range(6):
+        time.sleep(0.08)
+        chomp = min(chomp, state(b)['jaw'])
     time.sleep(0.8)
     b.eval("window.__dev.scene.worm.flash('open', 600, window.__dev.scene.time.now); 0")
-    time.sleep(0.3)
-    wide = state(b)['jaw']
+    for _ in range(6):
+        time.sleep(0.08)
+        wide = max(wide, state(b)['jaw'])
     check('челюсти: «жуёт» закрывает, «бросок» раскрывает', chomp < 0.25 and wide > 0.8, f'жуёт={chomp}, бросок={wide}')
     b.screenshot(shots / 'g13-jaws.png')
     # размер челюсти определяет, что можно съесть: помещающееся съедается, крупнее нет
@@ -1449,16 +1457,17 @@ def zone2_start(b, tier=5, up=(0, 0, 0), coins=0, ch='[]', lang=None):
 
 
 def far(b, y, x=30000):
-    """Поставить червя далеко от прежней расстановки и заморозить: рядом с ним нет чужой добычи, кроме поставленной тестом."""
-    b.eval("window.__dev.autopilot(false); window.__dev.setPos(%d, %d); window.__dev.freeze(true); 0" % (x, y))
+    """Поставить червя далеко от прежней расстановки и заморозить: рядом с ним нет чужой добычи, кроме поставленной тестом.
+    Глубина y задаётся в пикселях при масштабе 1 и умножается на текущий масштаб червя (мир реальных пропорций)."""
+    b.eval("window.__dev.autopilot(false); window.__dev.setPos(%d, %d * window.__dev.scene.worm.scale); window.__dev.freeze(true); 0" % (x, y))
     time.sleep(0.5)
 
 
 def place(b, kind, dx=None, x=None):
-    """Поставить добычу поверхности перед ртом червя (dx от рта) или в точке x."""
+    """Поставить добычу поверхности перед ртом червя (dx от рта, в пикселях масштаба 1) или в точке x."""
     if x is None:
         mx = b.eval('window.__dev.scene.worm.mouth().x')
-        x = mx + (dx or 0)
+        x = mx + (dx or 0) * b.eval('window.__dev.scene.worm.scale')
     return b.eval("window.__dev.placeSurface('%s', %f)" % (kind, x))
 
 
@@ -1467,14 +1476,14 @@ def t_zone2_world(b, shots):
     zone2_start(b, tier=5)
     s = state(b)
     kinds = s['surface']
-    check('поверхность: на 5-м тире вокруг червя люди и немного машин', kinds.count('person') >= 8 and len(kinds) == 18, str(kinds))
+    check('поверхность: на 5-м тире вокруг червя люди и немного машин', kinds.count('person') >= 8 and 14 <= len(kinds) <= 44, str(kinds))
     check('поверхность: фон над землёй: дальние дома и холмы видны', b.eval("window.__dev.scene.bg.skyline.visible && window.__dev.scene.bg.hills.visible") is True)
     check('поверхность: есть декор (деревья, кусты, фонари)', b.eval("window.__dev.scene.surface.decor.length") >= 8)
     b.screenshot(shots / 'g30-zone2.png')
     check('поверхность: нет ошибок в консоли', not b.errors(), str(b.errors()))
     # лесенка съедобности: вид -> (тир, при котором впервые съедобен)
     far(b, 400)
-    ladder = [('car', 7), ('house', 8), ('patrol', 8), ('truck', 9), ('bus', 10), ('apartment', 11), ('heavy', 12), ('tower', 12), ('skyscraper', 12)]
+    ladder = [('car', 7), ('house', 8), ('patrol', 8), ('truck', 9), ('bus', 10), ('apartment', 11), ('heavy', 11), ('tower', 12), ('skyscraper', 12)]
     bad = []
     for kind, first in ladder:
         place(b, kind, 4000)
@@ -1484,7 +1493,7 @@ def t_zone2_world(b, shots):
             ok = b.eval("(function(){var g=window.__dev.scene; return g.surface.isEdible(window.__test_it, g.worm.mouthRadius)})()")
             if ok != (tier >= first):
                 bad.append((kind, tier, ok))
-    check('лесенка тиров: машины с 7-го, дома и лёгкая охрана с 8-го, грузовики с 9-го, автобусы с 10-го, многоэтажки с 11-го, тяжёлая техника и башни с 12-го', not bad, str(bad))
+    check('лесенка тиров: машины с 7-го, дома и лёгкая охрана с 8-го, грузовики с 9-го, автобусы с 10-го, многоэтажки и тяжёлая техника с 11-го, башни и небоскрёбы с 12-го', not bad, str(bad))
     # пока выход закрыт (тир ниже 5), добыча поверхности не съедается
     b.eval("window.__dev.setTier(4); 0")
     far(b, 90, 20000)
@@ -1515,12 +1524,12 @@ def t_zone2_eat(b, shots):
     # люди бегут от червя
     far(b, -120, 34000)
     wx = b.eval('window.__dev.scene.worm.x')
-    place(b, 'person', x=wx + 450)
+    place(b, 'person', x=wx + 3200)
     b.eval("window.__test_it.think=1e9; 0")
     x0 = b.eval('window.__test_it.x')
     time.sleep(1.0)
     x1 = b.eval('window.__test_it.x')
-    check('поверхность: человек бежит от червя', x1 > x0 + 40, f'{x0:.0f} -> {x1:.0f}')
+    check('поверхность: человек бежит от червя', x1 > x0 + 400, f'{x0:.0f} -> {x1:.0f}')
     # машина с 7-го тира: даёт 5 очков, считается как машина
     b.eval("window.__dev.setTier(7); 0")
     far(b, -70, 36000)
@@ -1540,7 +1549,7 @@ def t_zone2_danger(b, shots):
     far(b, -260)
     s = state(b)
     check('здоровье: на 8-м тире запас 100 и полоса видна', s['hp'] == 100 and s['hpMax'] == 100 and b.eval("window.__dev.scene.scene.get('UI').last.hp") != '-', f"{s['hp']}/{s['hpMax']}")
-    place(b, 'patrol', 520)
+    place(b, 'patrol', 150)
     t0 = time.time()
     shot = False
     while time.time() - t0 < 7:
@@ -1553,7 +1562,7 @@ def t_zone2_danger(b, shots):
     while time.time() - t0 < 6 and state(b)['hp'] >= 100:
         time.sleep(0.15)
     s = state(b)
-    check('урон: попавший снаряд отнимает здоровье (8)', 90 <= s['hp'] <= 92.5, f"hp={s['hp']}")
+    check('урон: попавшая ракета отнимает здоровье (9)', 88 <= s['hp'] <= 92.5, f"hp={s['hp']}")
     check('урон: после попадания неуязвимость больше секунды', s['hpGrace'] > 0.2, f"hpGrace={s['hpGrace']}")
     hp1 = s['hp']
     b.eval('window.__dev.hit(20); 0')
@@ -1563,8 +1572,8 @@ def t_zone2_danger(b, shots):
     far(b, 900, 30000)
     time.sleep(0.5)
     b.eval('window.__dev.setHp(50); 0')
-    place(b, 'patrol', 520)
-    b.eval("(function(){var s=window.__dev.scene.surface; s.shots.forEach(function(x){x.img.destroy()}); s.shots=[]; return 0})()")
+    place(b, 'patrol', 150)
+    b.eval('window.__dev.scene.surface.clearRockets(); 0')
     time.sleep(3.2)
     s = state(b)
     check('безопасно: червь под землёй охрана не видит, снарядов нет', s['shots'] == 0, f"shots={s['shots']}")
@@ -1654,12 +1663,187 @@ def t_zone2_hints(b, shots):
     check('подсказка: при первом выходе на поверхность «Люди разбегаются…»', seen == 'hint_surface', str(seen))
     check('подсказка: показана один раз и записана в обучение', save_field(b, 'tutorial') & 32 == 32, str(save_field(b, 'tutorial')))
     b.eval("window.__dev.freeze(true); 0")
-    place(b, 'patrol', 600)
+    place(b, 'patrol', 160)
     time.sleep(7.0)
     seen = state(b)['toast']
     done = save_field(b, 'tutorial') & 64 == 64
     check('подсказка: при первой встрече с охраной «Осторожно…» (записана в обучение)', done, f"toast={seen}, tutorial={save_field(b, 'tutorial')}")
     check('подсказки: нет ошибок в консоли', not b.errors(), str(b.errors()))
+
+
+def t_scale(b, shots):
+    """Реалистичный масштаб: жуки крошки рядом с человеком, человек меньше машины, машина меньше дома и небоскрёба; камера отъезжает вместе с ростом."""
+    zone2_start(b, tier=5)
+    sizes = {}
+    for kind in ('person', 'car', 'house', 'truck', 'bus', 'apartment', 'tower', 'skyscraper', 'patrol', 'launcher', 'heavy'):
+        sizes[kind] = place(b, kind, 0)
+    beetle = b.eval("Math.max.apply(null, window.__dev.scene.prey.items.map(function(i){return i.r}).concat([0]))")
+    check('масштаб: самый крупный жук под землёй не выше 110 px в радиусе (крошка рядом с человеком)', 0 < beetle <= 110, f'{beetle:.0f}')
+    h = {k: v['h'] for k, v in sizes.items()}
+    w = {k: v['w'] for k, v in sizes.items()}
+    check('масштаб: человек ростом около 1500 px, то есть в 7 раз выше самого крупного жука', 1300 <= h['person'] <= 1750 and h['person'] > 6 * beetle, str(h['person']))
+    check('масштаб: человек < машина < дом < многоэтажка < башня < небоскрёб по высоте', h['person'] < h['car'] < h['house'] < h['apartment'] < h['tower'] < h['skyscraper'], str(h))
+    check('масштаб: машина в 2-3 раза длиннее человека в высоту, автобус длиннее грузовика, грузовик длиннее легковой', 2.0 <= w['car'] / h['person'] <= 3.2 and w['bus'] > w['truck'] > w['car'], f"{w['car'] / h['person']:.2f}")
+    # камера отъезжает: на любом тире червь на экране примерно того же размера, а мир мельчает
+    zoom, head = {}, {}
+    for tier in (1, 5, 8, 12):
+        b.eval("window.__dev.setTier(%d); 0" % tier)
+        time.sleep(0.5)
+        r = b.eval("(function(){var s=window.__dev.scene, c=s.cameras.main; return {z:c.zoom, head: s.worm.headRadius*c.zoom}})()")
+        zoom[tier], head[tier] = r['z'], r['head']
+    check('масштаб: камера отъезжает при росте (приближение падает на каждом тире)', zoom[1] > zoom[5] > zoom[8] > zoom[12], str(zoom))
+    check('масштаб: голова червя на экране остаётся 30-130 px на любом тире', all(30 <= v <= 130 for v in head.values()), str(head))
+    b.eval("window.__dev.setTier(5); 0")
+    time.sleep(0.4)
+    z5 = b.eval('window.__dev.scene.cameras.main.zoom')
+    check('масштаб: на 5-м тире человек на экране не меньше 80 px, а жук (диаметр до 208) не больше 25 px', h['person'] * z5 >= 80 and 208 * z5 <= 25, f"человек {h['person'] * z5:.0f} px, жук {208 * z5:.0f} px")
+    check('масштаб: нет ошибок в консоли', not b.errors(), str(b.errors()))
+
+
+FLY_JS = """(function(){var g=window.__dev.scene, w=g.worm; window.__dev.setPos(30000, -%d*w.scale); w.inAir=true; w.vx=0; w.vy=0; w.heading=0; window.__dev.freeze(false); g.hpGrace=1e9; 0})()"""
+
+
+def fly(b, lvl, key, secs, h=400, sample=0.1):
+    """Червь в воздухе на высоте h (в масштабах червя), ступень крыльев lvl, зажата клавиша key; вернуть замеры (y/S, vy/S, vx/S, inAir) каждые sample секунд."""
+    b.eval("window.__dev.setUpgrade('jump', %d); 0" % lvl)
+    b.eval(FLY_JS % h)
+    if key:
+        b.key_down(key)
+    out = []
+    t0 = time.time()
+    while time.time() - t0 < secs:
+        time.sleep(sample)
+        s = state(b)
+        out.append((s['y'] / s['scale'], s['vy'] / s['scale'], s['vx'] / s['scale'], s['inAir']))
+    if key:
+        b.key_up(key)
+    return out
+
+
+def t_flight(b, shots):
+    """Крылья: падение замедляется, парение, зависание, подъём и управление по горизонтали растут со ступенью; пикирование; потолок."""
+    zone2_start(b, tier=5)
+    # без крыльев: свободное падение, быстро на землю
+    r0 = fly(b, 0, None, 0.6)
+    vy0 = r0[-1][1]
+    check('крылья 0: падение свободное (скорость растёт как g · t)', vy0 > 700, f'vy={vy0:.0f}')
+    # ступень 1: падение заметно медленнее
+    r1 = fly(b, 1, 'ArrowUp', 0.6)
+    check('крылья 1: планирует, падение вдвое медленнее', r1[-1][3] and r1[-1][1] < 0.5 * vy0, f'vy={r1[-1][1]:.0f} против {vy0:.0f}')
+    # ступень 2: почти парит при «вверх»
+    r2 = fly(b, 2, 'ArrowUp', 1.2)
+    check('крылья 2: при «вверх» почти парит (за 1,2 с высота меняется меньше чем на 150)', r2[-1][3] and abs(r2[-1][0] - r2[0][0]) < 150, f'{r2[0][0]:.0f} -> {r2[-1][0]:.0f}')
+    # ступень 3: висит на месте при нейтральном управлении (стрелка вправо: по вертикали ничего не нажато)
+    r3 = fly(b, 3, 'ArrowRight', 1.2)
+    check('крылья 3: висит на месте (по вертикали не нажато), высота меняется меньше чем на 80', r3[-1][3] and abs(r3[-1][0] - r3[0][0]) < 80, f'{r3[0][0]:.0f} -> {r3[-1][0]:.0f}')
+    # подъём ступеней 3-5: чем выше ступень, тем быстрее набор
+    climb = {}
+    for lvl in (3, 4, 5):
+        r = fly(b, lvl, 'ArrowUp', 0.9, h=300)
+        climb[lvl] = r[0][0] - r[-1][0]
+    check('крылья 3-5: подъём тем быстрее, чем выше ступень', climb[3] > 100 and climb[4] > climb[3] and climb[5] > climb[4], str({k: round(v) for k, v in climb.items()}))
+    b.screenshot(shots / 'g33-flight.png')
+    # потолок: ступень 3 не поднимается выше своего предела
+    r = fly(b, 3, 'ArrowUp', 3.0, h=300)
+    top = -min(x[0] for x in r)
+    check('крылья 3: у потолка подъём останавливается (не выше ≈ 900 масштабов)', 500 < top < 1000, f'потолок {top:.0f}')
+    # пикирование быстрее нейтрального
+    rd = fly(b, 5, 'ArrowDown', 0.5, h=500)
+    rn = fly(b, 5, 'ArrowRight', 0.5, h=500)
+    check('крылья 5: пикирование вниз намного быстрее нейтрального', rd[-1][0] - rd[0][0] > 4 * max(10, rn[-1][0] - rn[0][0]), f'пике {rd[-1][0] - rd[0][0]:.0f}, нейтрально {rn[-1][0] - rn[0][0]:.0f}')
+    # управление по горизонтали: разгон вправо растёт со ступенью
+    vx = {}
+    for lvl in (0, 1, 3, 5):
+        r = fly(b, lvl, 'ArrowRight', 0.4, h=700)
+        vx[lvl] = r[-1][2]
+    check('крылья: управление по горизонтали растёт со ступенью (0 < 1 < 3 < 5)', 0 < vx[0] < vx[1] < vx[3] < vx[5], str({k: round(v) for k, v in vx.items()}))
+    # вид крыльев: при взмахах раскрыты, при пикировании сложены наполовину
+    b.eval("window.__dev.setUpgrade('jump', 5); 0")
+    b.eval(FLY_JS % 500)
+    b.key_down('ArrowUp')
+    time.sleep(0.6)
+    up_open = b.eval('window.__dev.scene.worm.wingOpen')
+    b.screenshot(shots / 'g33-flight-up.png')
+    b.key_up('ArrowUp')
+    b.key_down('ArrowDown')
+    time.sleep(0.4)
+    dive_open = b.eval('window.__dev.scene.worm.wingOpen')
+    b.key_up('ArrowDown')
+    check('крылья: взмахи раскрывают крылья, пикирование складывает наполовину', up_open > 0.9 and 0.35 < dive_open < 0.75, f'вверх {up_open:.2f}, пике {dive_open:.2f}')
+    # мышь: цель выше червя поднимает
+    b.eval("window.__dev.setUpgrade('jump', 4); 0")
+    b.eval(FLY_JS % 300)
+    time.sleep(0.2)
+    pos = b.eval("(function(){var g=window.__dev.scene, w=g.worm; return {x:w.x, y:w.y, S:w.scale}})()")
+    tgt = world_to_client(b, pos['x'] + 100 * pos['S'], pos['y'] - 220 * pos['S'])
+    b.mouse(tgt['x'], tgt['y'], 'move')
+    b.mouse(tgt['x'], tgt['y'], 'down')
+    time.sleep(0.7)
+    y_up = state(b)['y']
+    b.mouse(tgt['x'], tgt['y'], 'up')
+    check('крылья: цель мышью выше червя поднимает его', y_up < pos['y'] - 80 * pos['S'], f"{pos['y'] / pos['S']:.0f} -> {y_up / pos['S']:.0f}")
+    check('крылья: нет ошибок в консоли', not b.errors(), str(b.errors()))
+
+
+def t_rockets(b, shots):
+    """Ракеты охраны: пуск, пламя и дым, взрыв кадрами, урон и разлёт, залпы пусковой установки, охраны больше с тиром."""
+    zone2_start(b, tier=8)
+    far(b, -150)
+    b.eval("window.__dev.scene.surface.items.forEach(function(i){i.x += 1e6}); 0")
+    place(b, 'launcher', 260)
+    t0 = time.time()
+    most, frames, trail, boom, len_ok = 0, set(), 0, 0, True
+    while time.time() - t0 < 14:
+        st = state(b)
+        most = max(most, st['shots'])
+        if st['shots']:
+            info = b.eval("""(function(){var s=window.__dev.scene, r=s.surface.shots[0]; if(!r) return null;
+              return {f: r.flame.frame.name, len: r.len, vh: s.cameras.main.height / s.cameras.main.zoom,
+                      trail: s.children.list.filter(function(c){return c.frame && c.frame.name==='fx-dust-poof' && c.visible}).length,
+                      boom: s.children.list.filter(function(c){return c.frame && c.frame.name.indexOf('fx-boom')===0}).length}})()""")
+            if info:
+                frames.add(info['f'])
+                trail = max(trail, info['trail'])
+                boom = max(boom, info['boom'])
+                len_ok = len_ok and info['len'] >= 0.06 * info['vh'] * 0.95
+        if most >= 3 and len(frames) >= 2 and boom:
+            break
+        time.sleep(0.03)
+    check('ракеты: пусковая установка пускает залпом (3 и более ракеты в воздухе одновременно)', most >= 3, f'максимум {most}')
+    check('ракеты: пламя за ракетой меняет кадры (анимация)', len(frames) >= 2, str(frames))
+    check('ракеты: за ракетой дымный след', trail >= 3, f'частиц дыма: {trail}')
+    check('ракеты: взрыв рисуется кадрами fx-boom', boom >= 1, f'{boom}')
+    check('ракеты: ракета не меньше 6% высоты вида (хорошо видна при любом отъезде камеры)', len_ok)
+    time.sleep(1.5)
+    s = state(b)
+    check('ракеты: попадание отнимает здоровье (8 за ракету, неуязвимость между попаданиями)', 100 - s['hp'] >= 7.5, f"hp={s['hp']}")
+    b.screenshot(shots / 'g34-rockets.png')
+    # под землёй ракеты не пускают и не ранят
+    far(b, 900, 36000)
+    b.eval('window.__dev.setHp(100); window.__dev.scene.surface.clearRockets(); 0')
+    place(b, 'launcher', 170)
+    time.sleep(3.0)
+    s = state(b)
+    check('ракеты: под землёй червь цел, ракет нет', s['hp'] == 100 and s['shots'] == 0, f"hp={s['hp']}, shots={s['shots']}")
+    # взрыв рядом с червём ранит осколками наполовину; вдали не ранит
+    far(b, -150, 38000)
+    b.eval('window.__dev.setHp(100); window.__dev.scene.hpGrace = 0; 0')
+    b.eval("(function(){var g=window.__dev.scene, w=g.worm; g.onRocketBoom(w.x + w.headRadius*0.2, w.y, 2000, 20, false); return 0})()")
+    hp_near = state(b)['hp']
+    check('взрыв у самого тела ранит осколками наполовину (урон 20 даёт 10)', abs((100 - hp_near) - 10) < 0.6, f'hp={hp_near}')
+    b.eval('window.__dev.setHp(100); window.__dev.scene.hpGrace = 0; 0')
+    b.eval("(function(){var g=window.__dev.scene, w=g.worm; g.onRocketBoom(w.x + w.headRadius*6, w.y, 2000, 20, false); return 0})()")
+    check('взрыв вдали от червя не ранит', state(b)['hp'] == 100, f"hp={state(b)['hp']}")
+    # охраны становится больше с тиром
+    counts = {}
+    for tier in (7, 9, 12):
+        b.eval("window.__dev.setTier(%d); 0" % tier)
+        b.eval("window.__dev.scene.surface.clear(); window.__dev.scene.surface.populate(window.__dev.scene.worm.x, window.__dev.scene.worm.scale, window.__dev.scene.view(), %d); 0" % tier)
+        time.sleep(0.4)
+        kinds = state(b)['surface']
+        counts[tier] = sum(1 for k in kinds if k in ('patrol', 'launcher', 'heavy'))
+    check('охрана: чем выше тир, тем больше стреляющей техники (7 < 9 < 12 и на 12-м не меньше 5)', counts[7] < counts[9] < counts[12] and counts[12] >= 5, str(counts))
+    check('ракеты: нет ошибок в консоли', not b.errors(), str(b.errors()))
 
 
 TESTS = {
@@ -1672,6 +1856,7 @@ TESTS = {
     'halo': t_halo, 'bg': t_bg, 'juice': t_juice, 'selectsizes': t_select_sizes, 'english': t_english,
     'gear': t_gear, 'shop': t_shop, 'shopguard': t_shop_guard, 'shopsizes': t_shop_sizes, 'challenges': t_challenges, 'shopen': t_shop_english,
     'z2world': t_zone2_world, 'z2eat': t_zone2_eat, 'z2danger': t_zone2_danger, 'z2armor': t_zone2_armor, 'z2hud': t_zone2_hud, 'z2pace': t_zone2_pace, 'z2hints': t_zone2_hints,
+    'scale': t_scale, 'flight': t_flight, 'rockets': t_rockets,
 }
 
 

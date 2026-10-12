@@ -1,6 +1,3 @@
-import { SURFACE_TIER } from './world';
-import { wormScale } from './growth';
-
 /**
  * Добыча зоны 1: размеры в px мира (радиус, который должен поместиться в раскрытые челюсти).
  * Размеры абсолютные, не привязаны к масштабу червя: по мере роста мелочь становится слишком мелкой, а крупное
@@ -29,16 +26,8 @@ export const SIZE_WEIGHTS: number[][] = [
   [4, 12, 22, 30, 32],
 ];
 
-/**
- * После выхода зоны 1 (тир 5) её добыча растёт вместе с червём. Это временная замена настоящей добыче зон 2–4,
- * чтобы прототип оставался играбельным на любом тире.
- */
-export function sizeScale(S: number): number {
-  return Math.max(1, S / wormScale(SURFACE_TIER));
-}
-
-/** Случайный радиус добычи для данного тира и масштаба червя. */
-export function pickRadius(tier: number, S: number, rnd: () => number = Math.random): number {
+/** Случайный радиус добычи для данного тира (px мира, абсолютный: жуки и червячки с ростом червя не растут). */
+export function pickRadius(tier: number, rnd: () => number = Math.random): number {
   const row = SIZE_WEIGHTS[Math.min(tier, SIZE_WEIGHTS.length) - 1] ?? SIZE_WEIGHTS[SIZE_WEIGHTS.length - 1];
   const total = row.reduce((a, b) => a + b, 0);
   let roll = rnd() * total;
@@ -48,5 +37,5 @@ export function pickRadius(tier: number, S: number, rnd: () => number = Math.ran
     k++;
   }
   const c = SIZE_CLASSES[k];
-  return (c.min + (c.max - c.min) * rnd()) * sizeScale(S);
+  return c.min + (c.max - c.min) * rnd();
 }

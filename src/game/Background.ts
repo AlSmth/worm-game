@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { WORLD_WIDTH } from '../data/world';
+import { worldHalf } from '../data/world';
 import { atlasScale } from './assets';
 
 /**
@@ -18,9 +18,14 @@ const EDGE_GROUND = 190; // линия земли на полосе кромки
 const EDGE_HEIGHT = 512;
 const CLOUD_TOP = -820; // верх полосы облаков в мире
 const CLOUD_PARALLAX = 0.15;
-/** Дальние дома и холмы: стоят на земле (низ полосы чуть ниже линии земли, траву рисует кромка), параллакс по слоям. */
+/**
+ * Дальние дома и холмы «на бесконечности»: стоят на земле (низ полосы чуть ниже линии земли, траву рисует кромка), параллакс по слоям,
+ * а размер привязан к размеру экрана (доля высоты вида), а не к миру: с отъездом камеры они не становятся крошечными.
+ */
 const SKYLINE_H = 512;
 const HILLS_H = 256;
+const SKYLINE_FRAC = 0.27;
+const HILLS_FRAC = 0.13;
 const SKYLINE_PARALLAX = 0.3;
 const HILLS_PARALLAX = 0.55;
 const GROUND_SINK = 8;
@@ -83,14 +88,14 @@ export class WorldBackground {
     }
 
     // дальние дома и холмы над землёй
-    const sk = 1 / atlasScale('bg-z2-skyline');
+    const sk = (SKYLINE_FRAC * vh) / SKYLINE_H;
     const skTop = GROUND_SINK - SKYLINE_H * sk;
     this.skyline.setVisible(bottom > skTop && top < GROUND_SINK);
     if (this.skyline.visible) {
       this.skyline.setPosition(left, skTop).setSize(width, SKYLINE_H * sk).setTileScale(sk, sk);
       this.skyline.tilePositionX = (left * SKYLINE_PARALLAX) / sk;
     }
-    const hk = 1 / atlasScale('bg-z2-hills');
+    const hk = (HILLS_FRAC * vh) / HILLS_H;
     const hTop = GROUND_SINK - HILLS_H * hk;
     this.hills.setVisible(bottom > hTop && top < GROUND_SINK);
     if (this.hills.visible) {
@@ -124,7 +129,7 @@ export class WorldBackground {
     }
 
     // каменные стены по краям карты, от неба до глубины
-    const half = WORLD_WIDTH / 2;
+    const half = worldHalf(S);
     const right = left + width;
     const rimW = Math.max(40, 70 * S);
     const wallH = bottom - top;

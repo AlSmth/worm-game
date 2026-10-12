@@ -498,11 +498,13 @@ export class ShopScene extends Phaser.Scene {
     const nameKey = levelNameKey(r.line, maxed ? lvl : next);
     this.fit(r.name, t(nameKey), textW, tall ? 20 : 17, 12, 4);
     const cur = bonusPercent(r.line, lvl);
-    const effText = maxed
+    let effText = maxed
       ? t(`eff.${r.line}` as TextKey, { n: cur })
       : lvl === 0
         ? t(`eff.${r.line}` as TextKey, { n: bonusPercent(r.line, next) })
         : `${t(`eff.${r.line}` as TextKey, { n: cur })} → +${bonusPercent(r.line, next)}%`;
+    // крылья: к высоте прыжка добавляется умение лететь (парить, зависать, набирать высоту)
+    if (r.line === 'jump') effText = `${t(`fly.${maxed ? lvl : next}` as TextKey)} · ${t('eff.jump', { n: bonusPercent('jump', maxed ? lvl : next) })}`;
     this.fit(r.eff, effText, textW, tall ? 14 : 13, 10, 3, maxed ? '#9be15d' : '#cfe3ff');
     const labelH = tall ? r.label.height + 2 * u : 0;
     const blockH = labelH + r.name.height + 1 * u + r.eff.height;

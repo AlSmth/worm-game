@@ -11,7 +11,7 @@ export interface DevApi {
   setTier(n: number): void;
   autopilot(on: boolean): void;
   setPos(x: number, y: number): void;
-  world(): { width: number; surfaceTier: number };
+  world(): { width: number; surfaceTier: number; half: number };
   addCoins(n: number): void;
   openSelect(): void;
   openShop(): void;

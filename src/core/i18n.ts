@@ -45,7 +45,12 @@ const ru = {
   'line.jump': 'Прыжок',
   'line.hp': 'Здоровье',
   'line.speed': 'Скорость',
-  'eff.jump': 'Высота прыжка +{n}%',
+  'eff.jump': 'Прыжок +{n}%',
+  'fly.1': 'Планирует',
+  'fly.2': 'Почти парит',
+  'fly.3': 'Зависает',
+  'fly.4': 'Набирает высоту',
+  'fly.5': 'Свободный полёт',
   'eff.hp': 'Запас здоровья +{n}%',
   'eff.speed': 'Скорость +{n}%',
   shop_title: 'Магазин',
@@ -71,6 +76,7 @@ const ru = {
   stun_btn: 'Заново',
   hint_surface: 'Люди разбегаются! Прыгайте за ними. Под землёй безопасно, там здоровье восстанавливается',
   hint_guard: 'Осторожно: техника охраны стреляет. Уходите под землю, чтобы переждать',
+  hint_wings: 'Крылья: цель выше червя — взмахи и подъём, вровень — парение, ниже — пикирование',
 } as const;
 
 export type TextKey = keyof typeof ru;
@@ -118,7 +124,12 @@ const en: Record<TextKey, string> = {
   'line.jump': 'Jump',
   'line.hp': 'Health',
   'line.speed': 'Speed',
-  'eff.jump': 'Jump height +{n}%',
+  'eff.jump': 'Jump +{n}%',
+  'fly.1': 'Glides',
+  'fly.2': 'Nearly hovers',
+  'fly.3': 'Hovers',
+  'fly.4': 'Gains height',
+  'fly.5': 'Free flight',
   'eff.hp': 'Health +{n}%',
   'eff.speed': 'Speed +{n}%',
   shop_title: 'Shop',
@@ -144,6 +155,7 @@ const en: Record<TextKey, string> = {
   stun_btn: 'Try again',
   hint_surface: 'People are running! Leap after them. Underground is safe and heals you',
   hint_guard: 'Careful: guard machines shoot. Dive underground to wait it out',
+  hint_wings: 'Wings: aim above the worm to climb, level to hover, below to dive',
 };
 
 const dict: Record<Lang, Record<TextKey, string>> = { ru, en };

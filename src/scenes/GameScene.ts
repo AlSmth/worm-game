@@ -12,10 +12,10 @@ import { sfx } from '../core/audio';
 import { hideLoader } from '../core/loader';
 import { state, hitsUi, showToast } from '../core/state';
 import { platform } from '../platform/platform';
-import { save, TUTORIAL_COIN, TUTORIAL_EAT, TUTORIAL_GUARD, TUTORIAL_SURFACE } from '../platform/save';
-import { MAX_TIER, growthFor, growthNeeded, segmentsAt, wormScale } from '../data/growth';
+import { save, TUTORIAL_COIN, TUTORIAL_EAT, TUTORIAL_GUARD, TUTORIAL_SURFACE, TUTORIAL_WINGS } from '../platform/save';
+import { MAX_TIER, econScale, growthFor, growthNeeded, segmentsAt, wormScale } from '../data/growth';
 import { clampLevel, type LineId, type Upgrades } from '../data/upgrades';
-import { SURFACE_TIER, WORLD_WIDTH } from '../data/world';
+import { SURFACE_TIER, WORLD_WIDTH, worldHalf } from '../data/world';
 import { HIT_GRACE, HP_REGEN, RESPAWN_GRACE, SOIL_GROWTH_FACTOR, maxHp, type SurfaceKind } from '../data/surface';
 import type { SkinId } from '../data/skins';
 import { mountDevPanel, type DevApi } from '../dev/devPanel';
@@ -101,8 +101,9 @@ export class GameScene extends Phaser.Scene {
     this.tutArrow = this.add.image(0, 0, 'fx', 'fx-arrow').setDepth(600).setVisible(false);
     this.updateCamera(0, true);
     this.surface = new SurfaceSystem(this, {
-      onShoot: (x, y, big) => this.onGuardShot(x, y, big),
-      onImpact: (x, y, big) => this.onShotImpact(x, y, big),
+      onShoot: (x, y, len, ang) => this.onRocketLaunch(x, y, len, ang),
+      onTrail: (x, y, len) => this.onRocketTrail(x, y, len),
+      onExplode: (x, y, len, dmg, direct) => this.onRocketBoom(x, y, len, dmg, direct),
     });
     this.prey.populate(0, this.worm.y, S0, this.view(), state.tier);
     this.treasure.populate(0, this.worm.y, S0, this.view());
@@ -253,6 +254,7 @@ export class GameScene extends Phaser.Scene {
     w.update(dt, w.stunned ? NO_STEER : this.readSteer(), time);
     const view = this.view();
     this.prey.update(dt, time / 1000, w.x, w.y, w.scale, view, state.tier, w.mouthRadius);
+    this.treasure.econ = econScale(state.tier);
     this.treasure.update(dt, time / 1000, w.x, w.y, w.scale, view, w.mouthRadius);
     this.updateSurface(dt, time, view);
     if (!state.stunned) this.checkEating(time);
@@ -283,8 +285,9 @@ export class GameScene extends Phaser.Scene {
     else cam.setZoom(cam.zoom + (targetZoom - cam.zoom) * Math.min(1, 3 * dt));
     // камера не показывает пустоту за стенами карты: у края останавливается, оставляя видимой полосу стены
     const visW = cam.width / cam.zoom;
-    const minC = -WORLD_WIDTH / 2 + visW * 0.42;
-    const maxC = WORLD_WIDTH / 2 - visW * 0.42;
+    const half = worldHalf(S);
+    const minC = -half + visW * 0.42;
+    const maxC = half - visW * 0.42;
     const rawX = w.x + w.vx * 0.22;
     const cx = minC < maxC ? Math.max(minC, Math.min(maxC, rawX)) : 0;
     const cy = w.y + w.vy * 0.12 - viewH * 0.06;
@@ -353,7 +356,7 @@ export class GameScene extends Phaser.Scene {
     this.eaten++;
     this.quest('eat', 1);
     this.quest(it.species, 1);
-    this.addGrowth(growthFor(it.r, w.scale) * (state.tier >= SURFACE_TIER ? SOIL_GROWTH_FACTOR : 1));
+    this.addGrowth(growthFor(it.r) * (state.tier >= SURFACE_TIER ? SOIL_GROWTH_FACTOR : 1));
     this.markEaten();
   }
 
@@ -367,11 +370,11 @@ export class GameScene extends Phaser.Scene {
   /** Добыча над землёй съедена: люди, машины, дома, техника охраны. Большое сопровождается облаком пыли. */
   private eatSurface(it: SurfaceItem, m: { x: number; y: number }, now: number): void {
     const w = this.worm;
-    const big = it.r > 100;
+    const big = it.r > w.mouthRadius * 0.45;
     sfx.play(big ? 'chest' : 'eat');
     w.flash('chomp', 180, now);
     w.gulp(0.1 + Math.min(0.14, it.r / (w.mouthRadius * 7)));
-    this.fx.pop(m.x, m.y, 1, Math.max(120, it.r * 1.8));
+    this.fx.pop(m.x, m.y, 1, Math.max(120 * w.scale, Math.min(it.r * 1.8, w.mouthRadius * 2.6)));
     this.fx.burst(m.x, m.y, w.scale, { count: big ? 12 : 7, frame: 'fx-star', colors: STARS, speed: 420, life: 0.6, gravity: 900, size: big ? 28 : 22 });
     this.fx.burst(it.x, it.cy, 1, { count: big ? 5 : 2, frame: 'fx-dust-poof', colors: [0xf0d9b5], speed: 220, life: 0.8, gravity: 0, size: Math.max(70, it.w * 0.45) });
     this.surface.consume(it, m.x, m.y);
@@ -384,6 +387,14 @@ export class GameScene extends Phaser.Scene {
     else this.quest('buildings', 1);
     this.addGrowth(it.spec.points);
     this.markEaten();
+    // крупная добыча приносит монеты (люди нет): ценность растёт с тиром, как у сокровищ
+    const coins = Math.round(it.spec.coins * econScale(state.tier));
+    if (coins > 0) {
+      state.coins += coins;
+      save.patch({ coins: state.coins });
+      this.quest('coins', coins);
+      this.fx.floatText(m.x, m.y - 40 * w.scale, w.scale, `+${coins}`);
+    }
   }
 
   /** Сокровище съедено: монеты на счёт, искры, всплывающее число. */
@@ -576,12 +587,17 @@ export class GameScene extends Phaser.Scene {
     const w = this.worm;
     this.hpGrace = Math.max(0, this.hpGrace - dt);
     state.hpFlash = Math.max(0, state.hpFlash - dt);
-    const info: WormInfo = { x: w.x, y: w.y, vx: w.vx, vy: w.vy, scale: w.scale, exposed: w.y < w.headRadius * 0.7 && !state.stunned, scary: w.y < w.headRadius * 2.5 };
+    // круги тела нужны для попаданий ракет: считаем, только пока ракеты в воздухе и червь у поверхности
+    const near = this.surface.shots.length > 0 && w.y < w.headRadius * 2 + w.scale * 200;
+    const circles: BodyCircle[] = near ? w.hitCircles(this.circles) : [];
+    const info: WormInfo = {
+      x: w.x, y: w.y, vx: w.vx, vy: w.vy, scale: w.scale,
+      exposed: w.y < w.headRadius * 0.7 && !state.stunned,
+      scary: w.y < w.headRadius * 2.5,
+      circles,
+    };
     this.surface.update(dt, info, view, state.tier, w.canExit);
     this.surface.highlight(w.mouthRadius, w.canExit, time / 1000);
-    if (this.surface.shots.length && w.y < w.headRadius * 1.5) {
-      this.surface.collide(w.hitCircles(this.circles), (x, y, dmg) => this.hurt(dmg, x, y));
-    }
     // под землёй червь лечится
     if (!state.stunned && state.hp < state.hpMax && w.y > w.headRadius * 1.1) state.hp = Math.min(state.hpMax, state.hp + HP_REGEN * dt);
     // первая встреча с охраной: предупреждение (один раз, когда нет другого сообщения)
@@ -594,15 +610,48 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  private onGuardShot(x: number, y: number, big: boolean): void {
-    sfx.play('shoot');
-    this.fx.pop(x, y, 1, big ? 120 : 80, 0xffd27a);
+  /** Пуск ракеты: вспышка и облачко у ствола, звук пуска. */
+  private onRocketLaunch(x: number, y: number, len: number, ang: number): void {
+    sfx.play('launch');
+    this.fx.pop(x, y, 1, len * 0.9, 0xffd27a);
+    this.fx.burst(x, y, 1, { count: 3, frame: 'fx-dust-poof', colors: [0xf2eee8, 0xd8d2cb], speed: len * 0.9, life: 0.7, gravity: 0, size: len * 0.45 });
+    void ang;
   }
 
-  private onShotImpact(x: number, y: number, big: boolean): void {
-    const S = big ? 1.4 : 1;
-    this.fx.burst(x, y, S, { count: 4, frame: 'fx-dirt-chunk', colors: DIRT, speed: 260, life: 0.5, gravity: 1100, size: 16 });
-    this.fx.burst(x, y - 10, S, { count: 1, frame: 'fx-dust-poof', colors: [0xf0d9b5], speed: 90, life: 0.5, gravity: 0, size: 60 });
+  /** Дымный след за ракетой: серые облачка, расползаются и гаснут. */
+  private onRocketTrail(x: number, y: number, len: number): void {
+    this.fx.burst(x, y, 1, { count: 1, frame: 'fx-dust-poof', colors: [0xeeeae4, 0xcfc9c2], speed: len * 0.1, life: 0.8, gravity: -len * 0.08, size: len * 0.28 });
+  }
+
+  /**
+   * Взрыв ракеты: огненный шар с дымом и камнями (о землю), встряска. Урон червю: прямое попадание бьёт полностью,
+   * а рядом (в радиусе взрыва) наполовину, если червь над землёй или у самой поверхности.
+   */
+  private onRocketBoom(x: number, y: number, len: number, dmg: number, direct: boolean): void {
+    const w = this.worm;
+    sfx.play('boom');
+    const size = len * 1.5;
+    this.fx.boom(x, y - size * 0.12, size);
+    this.fx.burst(x, y, 1, { count: 6, frame: 'fx-dirt-chunk', colors: DIRT, speed: len * 1.1, life: 0.8, gravity: len * 2.2, size: len * 0.2 });
+    this.fx.burst(x, y - size * 0.2, 1, { count: 3, frame: 'fx-dust-poof', colors: [0x8d857d, 0xb7aea5], speed: len * 0.5, life: 1.0, gravity: -len * 0.2, size: len * 0.7 });
+    // чем ближе взрыв к червю, тем сильнее встряска
+    const d = Math.hypot(x - w.x, y - w.y);
+    if (d < len * 14 + w.scale * 1500) this.cameras.main.shake(180, 0.005);
+    if (direct) {
+      this.hurt(dmg, x, y);
+      return;
+    }
+    // осколки по ближнему червю: взрыв у самого тела (радиус взрыва ≈ длина ракеты)
+    if (w.y < w.headRadius * 2 + w.scale * 200) {
+      const cs = w.hitCircles(this.circles);
+      const rr = size * 0.5;
+      for (const c of cs) {
+        if (Math.hypot(x - c.x, y - c.y) < c.r + rr) {
+          this.hurt(dmg * 0.5, x, y);
+          break;
+        }
+      }
+    }
   }
 
   /** Попадание снаряда: урон, вспышка, неуязвимость на секунду; здоровье кончилось — червь оглушён. */
@@ -662,8 +711,7 @@ export class GameScene extends Phaser.Scene {
     w.flash('happy', 600, this.time.now);
     w.reset(w.x, 300 * w.scale, 0);
     this.camReady = false;
-    this.surface.shots.forEach((sh) => sh.img.destroy());
-    this.surface.shots = [];
+    this.surface.clearRockets();
     platform.gameplay(true);
     sfx.play('grow');
   }
@@ -676,6 +724,9 @@ export class GameScene extends Phaser.Scene {
     if (!(save.data.tutorial & TUTORIAL_SURFACE)) {
       save.patch({ tutorial: save.data.tutorial | TUTORIAL_SURFACE });
       showToast('hint_surface', 6);
+    } else if (w.upgrades.jump > 0 && !(save.data.tutorial & TUTORIAL_WINGS)) {
+      save.patch({ tutorial: save.data.tutorial | TUTORIAL_WINGS });
+      showToast('hint_wings', 6);
     }
     this.fx.burst(w.x, 0, w.scale, { count: 12, frame: 'fx-dirt-chunk', colors: DIRT, speed: 420, life: 0.7, gravity: 1500, size: 20 });
     this.fx.burst(w.x, 0, w.scale, { count: 3, frame: 'fx-dust-poof', colors: [0xf0d9b5], speed: 200, life: 0.7, gravity: 0, size: 70 });
@@ -733,6 +784,9 @@ export class GameScene extends Phaser.Scene {
         inAir: this.worm.inAir,
         x: Math.round(this.worm.x),
         y: Math.round(this.worm.y),
+        vx: Math.round(this.worm.vx),
+        vy: Math.round(this.worm.vy),
+        lift: Math.round(this.worm.lift * 100) / 100,
         prey: this.prey.items.length,
         treasures: this.treasure.items.length,
         coins: state.coins,
@@ -760,6 +814,9 @@ export class GameScene extends Phaser.Scene {
         state.need = growthNeeded(state.tier);
         save.patch({ tier: state.tier, growth: 0 });
         this.applySize();
+        // для проверок размер меняется сразу, а не плавно
+        this.worm.scale = this.worm.targetScale;
+        this.camReady = false;
       },
       autopilot: (on) => {
         this.autopilot = on;
@@ -768,7 +825,7 @@ export class GameScene extends Phaser.Scene {
         this.worm.reset(x, y, this.worm.heading);
         this.camReady = false;
       },
-      world: () => ({ width: WORLD_WIDTH, surfaceTier: SURFACE_TIER }),
+      world: () => ({ width: WORLD_WIDTH, surfaceTier: SURFACE_TIER, half: worldHalf(this.worm.scale) }),
       addCoins: (n) => {
         state.coins = Math.max(0, state.coins + n);
         save.patch({ coins: state.coins });

@@ -1,5 +1,3 @@
-import { sizeScale } from './prey';
-
 /**
  * Сокровища зоны 1: за съеденное даются монеты (концепт, раздел 8). Чем глубже, тем богаче.
  * Размеры абсолютные, как у добычи: большой сундук съедобен, когда червь подрастёт (с 3-го тира).
@@ -43,6 +41,7 @@ export function availableAt(y: number, S: number): TreasureSpec[] {
   return TREASURES.filter((t) => y >= t.minDepth * Math.max(1, S * 0.6));
 }
 
-export function scaledRadius(spec: TreasureSpec, S: number): number {
-  return spec.r * sizeScale(S);
+/** Радиус сокровища, px мира: абсолютный, с ростом червя не растёт (под землёй это уже крошки). */
+export function scaledRadius(spec: TreasureSpec): number {
+  return spec.r;
 }
