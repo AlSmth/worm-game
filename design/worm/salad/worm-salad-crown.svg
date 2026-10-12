@@ -1,0 +1,4 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+<defs><linearGradient id="worm-salad-crown-leaf" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#B9F27A"/><stop offset="1" stop-color="#4FB04A"/></linearGradient></defs>
+<g transform="translate(128 128)" stroke-linejoin="round" stroke-linecap="round"><path d="M 4 -66 Q 2 -88 8 -104" fill="none" stroke="#2B1B17" stroke-width="12"/><path d="M 4 -66 Q 2 -88 8 -104" fill="none" stroke="#4FA83F" stroke-width="5.5"/><path d="M 8 -98 C -14 -112 -32 -100 -30 -86 C -14 -82 2 -86 8 -98 Z" fill="url(#worm-salad-crown-leaf)" stroke="#2B1B17" stroke-width="4.5"/><path d="M 9 -104 C 28 -124 52 -116 52 -100 C 40 -92 20 -92 9 -104 Z" fill="url(#worm-salad-crown-leaf)" stroke="#2B1B17" stroke-width="4.5"/></g>
+</svg>

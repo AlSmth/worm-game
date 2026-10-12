@@ -1,0 +1,16 @@
+# зависимости и сборка
+node_modules/
+dist/
+*.zip
+
+# Python
+__pycache__/
+*.pyc
+
+# локальные настройки Claude
+.claude/settings.local.json
+
+# мусор
+*.log
+.DS_Store
+Thumbs.db
