@@ -193,6 +193,18 @@
     <canvas class="zone" id="z2"></canvas>
   </section>
 
+  <section class="zone1">
+    <h3>Зона 3 «Небо»: самолёты, вертолёты, скоростной самолёт охраны, лайнеры, грузовой гигант</h3>
+    <p>Спрайты смотрят вправо, винты и лопасти мерцают двумя кадрами. Размеры в сцене относительны (в игре радиус задаёт съедобность): лёгкий самолёт и малые вертолёты с 13-го тира, скоростной самолёт и тяжёлый вертолёт стреляют ракетами (те же, что у охраны на земле), лайнеры с 14-го, грузовые гиганты с 15-го. Без людей в кабинах, без флагов, звёзд, кокард и номеров.</p>
+    <canvas class="zone" id="z3"></canvas>
+  </section>
+
+  <section class="zone1">
+    <h3>Зона 4 «Космос» и финал: спутники, станция, астероиды, Луна, Земля</h3>
+    <p>Астероиды трёх форм и трёх размеров: мелкие съедобны с 18-го тира, средние с 19-го, большие с 20-го, а пока они не по зубам, при касании бьют. Луна съедобна с 20-го тира, Земля с 21-го (финал). Земля нарисована условными материками, без очертаний реальных стран. Масштаб Луны и Земли в сцене по радиусам из игры (Луна около четверти Земли).</p>
+    <canvas class="zone" id="z4"></canvas>
+  </section>
+
   <section id="variants"></section>
 
   <h3>Стайлборд</h3>
@@ -237,6 +249,9 @@
     decor: ['z2-tree-a', 'z2-tree-b', 'z2-bush', 'z2-lamp'],
     background: ['bg-z2-skyline', 'bg-z2-hills']
   };
+  var Z3_FILES = ['z3-plane-a-1', 'z3-plane-a-2', 'z3-plane-b-1', 'z3-plane-b-2', 'z3-heli-a-1', 'z3-heli-a-2', 'z3-heli-b-1', 'z3-heli-b-2', 'z3-fighter',
+    'z3-heavy-1', 'z3-heavy-2', 'z3-airliner-a', 'z3-airliner-b', 'z3-cargo'];
+  var Z4_FILES = ['z4-sat-a', 'z4-sat-b', 'z4-station', 'z4-rock-a', 'z4-rock-b', 'z4-rock-c', 'z4-moon', 'z4-earth'];
   var FAR_SCALE = 0.86;
   var st = { segs: 8, thick: 1, jaw: 0.53, expr: 'idle', wave: true, prey: true, fit: true, bg: 'ground',
              wings: 0, armor: 0, fins: 0, anchors: false, flap: true, folded: false, pick: null };
@@ -280,6 +295,8 @@
     Z1_TREASURE.forEach(function (n) { list.push([n, turl(n)]); });
     Z1_FX.forEach(function (n) { list.push([n, furl(n)]); });
     Object.keys(Z2_FILES).forEach(function (dir) { Z2_FILES[dir].forEach(function (n) { list.push([n, '../zone-2-surface/' + dir + '/' + n + '.svg?v=' + BUST]); }); });
+    Z3_FILES.forEach(function (n) { list.push([n, '../zone-3-sky/planes/' + n + '.svg?v=' + BUST]); });
+    Z4_FILES.forEach(function (n) { list.push([n, '../zone-4-space/objects/' + n + '.svg?v=' + BUST]); });
     var left = list.length;
     list.forEach(function (it) {
       var im = new Image();
@@ -734,6 +751,63 @@
     ctx.fillText('сцена зоны 2 в масштабе игры (люди бегут, стволы охраны целятся); фон: дальние дома и холмы', 12, H - 8);
   }
 
+  // Сцена зоны 3: небо с облаками, летательные аппараты одним рядом в относительных размерах (радиус как в игре, масштаб подобран к сцене).
+  var Z3_ROW = [
+    ['z3-plane-a', 0.5, 2], ['z3-plane-b', 0.5, 2], ['z3-heli-a', 0.55, 2], ['z3-heli-b', 0.55, 2], ['z3-fighter', 0.85, 1], ['z3-heavy', 1.15, 2],
+    ['z3-airliner-a', 1.7, 1], ['z3-airliner-b', 1.7, 1], ['z3-cargo', 2.4, 1]
+  ];
+  function renderZone3() {
+    var cv = $('z3'); if (!cv) { return; }
+    var c = sizeCanvas(cv), ctx = c.ctx, W = c.w, H = c.h;
+    var sky = ctx.createLinearGradient(0, 0, 0, H); sky.addColorStop(0, '#2F6FE0'); sky.addColorStop(1, '#BFE6FF');
+    ctx.fillStyle = sky; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = 'rgba(255,255,255,.85)';
+    for (var i = 0; i < 9; i++) {
+      var cx = ((i * 211 + T * 6) % (W + 160)) - 80, cy = 30 + (i * 53) % (H - 80);
+      ctx.beginPath(); ctx.ellipse(cx, cy, 70, 20, 0, 0, 7); ctx.ellipse(cx + 36, cy - 12, 44, 22, 0, 0, 7); ctx.ellipse(cx - 40, cy - 6, 38, 17, 0, 0, 7); ctx.fill();
+    }
+    var total = 0;
+    Z3_ROW.forEach(function (it) { total += 250 * it[1] + 30; });
+    var k = Math.min(1, (W - 30) / total * 1.0), x0 = 16, rows = 2, rowIdx = 0;
+    var perRow = Math.ceil(Z3_ROW.length / rows), rowH = H / rows;
+    Z3_ROW.forEach(function (it, i) {
+      var name = it[0] + (it[2] === 2 ? '-' + (Math.floor(T * 14) % 2 + 1) : ''), im = IMG[name];
+      if (!im || !im.naturalWidth) { return; }
+      if (i % perRow === 0) { x0 = 16; rowIdx = Math.floor(i / perRow); }
+      var s = Math.min(k, 1) * it[1] * 1.15, w = im.naturalWidth * s, h = im.naturalHeight * s;
+      var y = rowIdx * rowH + rowH / 2 - h / 2 + Math.sin(T * 1.4 + i) * 6;
+      ctx.drawImage(im, x0, y, w, h);
+      x0 += w + 22;
+    });
+    ctx.fillStyle = 'rgba(255,255,255,.9)'; ctx.font = '12px system-ui';
+    ctx.fillText('зона 3: вся техника неба (в игре летает туда-сюда на разной высоте; быстрый самолёт и тяжёлый вертолёт стреляют)', 12, H - 8);
+  }
+
+  // Сцена зоны 4: звёзды, Земля и Луна по радиусам из игры, спутники, станция, астероиды.
+  function renderZone4() {
+    var cv = $('z4'); if (!cv) { return; }
+    var c = sizeCanvas(cv), ctx = c.ctx, W = c.w, H = c.h;
+    ctx.fillStyle = '#050A1E'; ctx.fillRect(0, 0, W, H);
+    for (var i = 0; i < 160; i++) {
+      var sx = (i * 977) % W, sy = (i * 463) % H, tw = 0.5 + 0.5 * Math.sin(T * 1.5 + i);
+      ctx.fillStyle = 'rgba(255,255,255,' + (0.35 + 0.6 * tw) + ')'; ctx.fillRect(sx, sy, i % 5 === 0 ? 3 : 2, i % 5 === 0 ? 3 : 2);
+    }
+    var items = [['z4-earth', 0.78, 4, 10], ['z4-moon', 0.21, 0.55, 0.12], ['z4-sat-a', 0.16, 0.7, 0.62], ['z4-sat-b', 0.11, 0.78, 0.2], ['z4-station', 0.3, 0.7, 0.4],
+      ['z4-rock-a', 0.12, 0.5, 0.78], ['z4-rock-b', 0.08, 0.3, 0.85], ['z4-rock-c', 0.17, 0.62, 0.42]];
+    items.forEach(function (it, i) {
+      var im = IMG[it[0]]; if (!im || !im.naturalWidth) { return; }
+      var h = H * it[1], w = im.naturalWidth * h / im.naturalHeight, x, y, rot = 0;
+      if (it[0] === 'z4-earth') { x = W * 0.12; y = H * 0.5 - h / 2; }
+      else if (it[0] === 'z4-moon') { x = W * 0.34; y = H * 0.12; }
+      else { x = W * (0.44 + 0.5 * ((i * 0.37) % 1)); y = H * (0.1 + 0.7 * ((i * 0.53) % 1)); rot = T * 0.15 * (i % 2 ? 1 : -1); }
+      ctx.save(); ctx.translate(x + w / 2, y + h / 2);
+      if (it[0].indexOf('rock') > 0 || it[0].indexOf('sat') > 0) { ctx.rotate(rot * 0.3); }
+      ctx.drawImage(im, -w / 2, -h / 2, w, h); ctx.restore();
+    });
+    ctx.fillStyle = 'rgba(255,255,255,.85)'; ctx.font = '12px system-ui';
+    ctx.fillText('зона 4: Земля и Луна (радиус Луны ≈ 0,27 радиуса Земли), спутники, станция, астероиды; финал: съесть Землю на 21-м тире', 12, H - 8);
+  }
+
   function renderZone1Parts() {
     var host = $('z1layers');
     if (host && !host.children.length) {
@@ -775,7 +849,7 @@
     }
   }
 
-  function renderAll() { renderCards(); renderProg(); renderGearRows(); paintPick(); renderPrey(); renderZone1(); renderZone1Parts(); renderZone2(); }
+  function renderAll() { renderCards(); renderProg(); renderGearRows(); paintPick(); renderPrey(); renderZone1(); renderZone1Parts(); renderZone2(); renderZone3(); renderZone4(); }
 
   // ---------- элементы управления ----------
   $('exprs').innerHTML = EXPRS.map(function (e) { return '<button data-e="' + e[0] + '"' + (e[0] === st.expr ? ' class="on"' : '') + '>' + e[1] + '</button>'; }).join('');
@@ -849,7 +923,7 @@
       if ((st.wings || st.armor || st.fins) && st.flap) { renderStages(); }
       if (st.flap) { renderProg(); }
       tickPrey(1 / 30);
-      renderZone1(); renderZone1Parts(); renderZone2();
+      renderZone1(); renderZone1Parts(); renderZone2(); renderZone3(); renderZone4();
     }
     requestAnimationFrame(tick);
   }

@@ -955,6 +955,9 @@ def t_halo(b, shots):
     seed_chosen(b)
     boot(b, URL, choose=False)
     time.sleep(0.6)
+    # на старте крупной добычи может случайно не оказаться: одну делаем крупнее челюстей, другую мельче (дальше всё считается само)
+    b.eval("(function(){var s=window.__dev.scene, mr=s.worm.mouthRadius, a=s.prey.items.filter(function(i){return !i.dying}); a[0].r = mr*1.6; a[1].r = mr*0.5; return 0})()")
+    time.sleep(0.4)
     res = b.eval("(function(){var s=window.__dev.scene, mr=s.worm.mouthRadius, ok=0, bad=0, big=0, small=0;"
                  "s.prey.items.forEach(function(i){ if(i.dying) return; var want = i.r <= mr; if (i.halo.visible === want) ok++; else bad++; if (want) small++; else big++; });"
                  "return {ok:ok, bad:bad, edible:small, tooBig:big}})()")
@@ -1166,6 +1169,7 @@ def t_shop(b, shots):
     b.add_init_script(FAKE_SDK.replace('__LANG__', 'ru'))
     seed_shop(b, coins=10, tutorial=3)
     boot(b, URL, choose=False)
+    b.eval("window.__dev.freeze(true); 0")  # червь не подбирает монеты по пути: счёт в проверках точный
     check('магазин: кнопка магазина есть в интерфейсе, не меньше 44 CSS-px',
           min(ui_rect(b, 'shopRect')[2:]) / b.eval('window.__dev.scene.scene.get("UI").u') >= 44)
     check('магазин: при нехватке монет красной точки нет', b.eval("window.__dev.scene.scene.get('UI').shopDot.commandBuffer.length") == 0)
@@ -1218,6 +1222,7 @@ def t_shop(b, shots):
     s3 = state(b)
     check('закрытие: Escape закрывает магазин и не включает паузу', s3['shopOpen'] is False and s3['paused'] is False, f"shop={s3['shopOpen']}, paused={s3['paused']}")
     check('закрытие: gameplay снова запущен (start)', 'start' in b.eval('window.__sdkLog')[log1:], str(b.eval('window.__sdkLog')[log1:]))
+    b.eval("window.__dev.freeze(false); 0")
     x1 = state(b)['x']
     time.sleep(0.8)
     check('закрытие: игра пошла дальше, червь плывёт', abs(state(b)['x'] - x1) > 20, f"{x1} -> {state(b)['x']}")
@@ -1573,7 +1578,7 @@ def t_zone2_danger(b, shots):
     time.sleep(0.5)
     b.eval('window.__dev.setHp(50); 0')
     place(b, 'patrol', 150)
-    b.eval('window.__dev.scene.surface.clearRockets(); 0')
+    b.eval('window.__dev.scene.rockets.clear(); 0')
     time.sleep(3.2)
     s = state(b)
     check('безопасно: червь под землёй охрана не видит, снарядов нет', s['shots'] == 0, f"shots={s['shots']}")
@@ -1797,7 +1802,7 @@ def t_rockets(b, shots):
         st = state(b)
         most = max(most, st['shots'])
         if st['shots']:
-            info = b.eval("""(function(){var s=window.__dev.scene, r=s.surface.shots[0]; if(!r) return null;
+            info = b.eval("""(function(){var s=window.__dev.scene, r=s.rockets.shots[0]; if(!r) return null;
               return {f: r.flame.frame.name, len: r.len, vh: s.cameras.main.height / s.cameras.main.zoom,
                       trail: s.children.list.filter(function(c){return c.frame && c.frame.name==='fx-dust-poof' && c.visible}).length,
                       boom: s.children.list.filter(function(c){return c.frame && c.frame.name.indexOf('fx-boom')===0}).length}})()""")
@@ -1820,7 +1825,7 @@ def t_rockets(b, shots):
     b.screenshot(shots / 'g34-rockets.png')
     # под землёй ракеты не пускают и не ранят
     far(b, 900, 36000)
-    b.eval('window.__dev.setHp(100); window.__dev.scene.surface.clearRockets(); 0')
+    b.eval('window.__dev.setHp(100); window.__dev.scene.rockets.clear(); 0')
     place(b, 'launcher', 170)
     time.sleep(3.0)
     s = state(b)
@@ -1846,6 +1851,319 @@ def t_rockets(b, shots):
     check('ракеты: нет ошибок в консоли', not b.errors(), str(b.errors()))
 
 
+# ---------------------------------------------------------------- Э6: небо, космос, финал
+SPACE_TOP = 4e7
+SPACE_HALF = 8e7
+EARTH_R = 3.6e7
+SKY_FLY = 40 * 330
+
+
+def sky_top(S):
+    return SKY_FLY * S
+
+
+def t_zones(b, shots):
+    """Зоны по тиру, ролики «прорыва» в небо и космос, полёт без тяжести, потолок неба, стены космоса, пол над Землёй, возврат из сохранения."""
+    zone2_start(b, tier=4)
+    got = {}
+    for tier, want in ((4, 'under'), (5, 'ground'), (12, 'ground'), (13, 'sky'), (16, 'sky'), (17, 'space'), (21, 'space')):
+        b.eval("window.__dev.setTier(%d); 0" % tier)
+        time.sleep(0.15)
+        got[tier] = state(b)['zone']
+        if got[tier] != want:
+            break
+    check('зоны: под землёй до 4-го тира, поверхность 5-12, небо 13-16, космос 17-21', all(got[t] == z for t, z in ((4, 'under'), (5, 'ground'), (12, 'ground'), (13, 'sky'), (16, 'sky'), (17, 'space'), (21, 'space')) if t in got) and len(got) == 7, str(got))
+    # ролик «прорыв» из земли в небо
+    b.eval("window.__dev.setTier(12); 0")
+    time.sleep(0.5)
+    S0 = b.eval('window.__dev.scene.worm.scale')
+    b.eval("window.__dev.freeze(false); window.__dev.setPos(0, -300 * window.__dev.scene.worm.scale); 0")
+    time.sleep(0.4)
+    s = state(b)
+    b.eval('window.__dev.addGrowth(%d); 0' % (s['need'] - s['growth'] + 1))
+    time.sleep(0.5)
+    s = state(b)
+    check('прорыв: при росте до 13-го тира начинается ролик, ввод закрыт, червь летит вверх', s['cine'] == 'sky' and s['tier'] == 13, f"cine={s['cine']}, tier={s['tier']}")
+    check('прорыв: сообщение про небо', s['toast'] == 'zone_sky', str(s['toast']))
+    b.key_down('ArrowDown')
+    y_a = state(b)['y']
+    time.sleep(0.6)
+    y_b = state(b)['y']
+    b.key_up('ArrowDown')
+    check('прорыв: во время ролика клавиши не управляют (червь продолжает подъём)', y_b < y_a, f'{y_a} -> {y_b}')
+    t0 = time.time()
+    while time.time() - t0 < 6 and state(b)['cine']:
+        time.sleep(0.1)
+    s = state(b)
+    check('прорыв: ролик заканчивается, зона «небо», червь в полёте', s['cine'] is None and s['zone'] == 'sky' and s['flight'] is True, f"{s['cine']}, {s['zone']}, {s['flight']}")
+    check('прорыв: червь высоко над землёй, на земле нет охраны и людей, в воздухе есть добыча', s['y'] < -0.03 * sky_top(s['scale']) and not any(k in ('person', 'car', 'house') for k in s['surface']) and len(s['air']) >= 10, f"y={s['y']}, air={len(s['air'])}")
+    b.screenshot(shots / 'g40-sky-start.png')
+    # полёт без тяжести: курс держится
+    b.eval('window.__dev.scene.hpGrace = 1e9; 0')
+    w0 = b.eval("(function(){var w=window.__dev.scene.worm; w.heading = 0; w.heading = 0; return {y:w.y, S:w.scale}})()")
+    time.sleep(0.6)
+    w1 = b.eval("(function(){var w=window.__dev.scene.worm; return {y:w.y, vy:w.vy}})()")
+    check('небо: без тяжести (курс вправо, высота почти не меняется)', abs(w1['y'] - w0['y']) < 0.4 * w0['S'] * 330, f"{w0['y']:.0f} -> {w1['y']:.0f}")
+    b.key_down('ArrowUp')
+    time.sleep(1.0)
+    y2 = state(b)['y']
+    b.key_up('ArrowUp')
+    check('небо: стрелка вверх поднимает червя (он плывёт по воздуху)', y2 < w1['y'] - 0.5 * w0['S'] * 330 * 0.5, f"{w1['y']:.0f} -> {y2:.0f}")
+    # потолок неба
+    S = state(b)['scale']
+    b.eval("window.__dev.setPos(0, -%f); window.__dev.scene.hpGrace = 1e9; window.__dev.scene.worm.heading = -Math.PI/2; 0" % (sky_top(S) * 0.995))
+    b.key_down('ArrowUp')
+    time.sleep(1.6)
+    top_y = state(b)['y']
+    S_end = state(b)['scale']  # червь мог что-то съесть и вырасти, потолок растёт вместе с ним
+    b.key_up('ArrowUp')
+    check('небо: потолок атмосферы не пускает выше', top_y >= -sky_top(max(S, S_end)) * 1.001, f'{top_y:.0f} против {-sky_top(max(S, S_end)):.0f}')
+    # нырок под землю: вниз до земли, почва
+    b.eval("window.__dev.setPos(0, -%f); window.__dev.scene.worm.heading = Math.PI/2; 0" % (S * 330 * 1.5))
+    b.key_down('ArrowDown')
+    time.sleep(3.0)
+    b.key_up('ArrowDown')
+    check('небо: к земле можно спуститься и уйти под землю (там почва)', state(b)['y'] > 0, f"y={state(b)['y']}")
+    # космос: прорыв из неба
+    b.eval("window.__dev.setTier(16); window.__dev.setPos(0, -%f); window.__dev.scene.hpGrace = 1e9; 0" % (sky_top(b.eval('window.__dev.scene.worm.scale')) * 0.5))
+    time.sleep(0.5)
+    s = state(b)
+    b.eval('window.__dev.addGrowth(%d); 0' % (s['need'] - s['growth'] + 1))
+    time.sleep(0.4)
+    check('прорыв: при росте до 17-го тира ролик в космос', state(b)['cine'] == 'space', str(state(b)['cine']))
+    t0 = time.time()
+    while time.time() - t0 < 8 and state(b)['cine']:
+        time.sleep(0.1)
+    s = state(b)
+    check('прорыв: зона «космос», в мире Земля и Луна, добыча вокруг', s['cine'] is None and s['zone'] == 'space' and 'earth' in s['air'] and 'moon' in s['air'] and len(s['air']) >= 8, f"{s['zone']}, {s['air'][:6]}")
+    check('космос: червь над Землёй (выше края атмосферы)', -SPACE_TOP * 1.01 <= s['y'] < 0, f"y={s['y']}")
+    time.sleep(0.8)
+    b.screenshot(shots / 'g41-space-start.png')
+    # стены арены и пол над Землёй
+    b.eval("window.__dev.scene.hpGrace = 1e9; window.__dev.setPos(%f, %f); window.__dev.scene.worm.heading = 0; 0" % (SPACE_HALF - 1.5e6, -SPACE_TOP * 0.4))
+    b.key_down('ArrowRight')
+    time.sleep(1.6)
+    x1 = state(b)['x']
+    b.key_up('ArrowRight')
+    check('космос: стена арены не пускает', x1 <= SPACE_HALF, f'x={x1}')
+    b.eval("window.__dev.setPos(0, -1.5e6); window.__dev.scene.worm.heading = Math.PI/2; 0")
+    b.key_down('ArrowDown')
+    time.sleep(2.0)
+    y3 = state(b)['y']
+    b.key_up('ArrowDown')
+    check('космос: до последнего тира Земля не пускает (пол над атмосферой)', y3 < 0, f'y={y3}')
+    check('космос: нет ошибок в консоли', not b.errors(), str(b.errors()))
+
+
+def t_zone_save(b, shots):
+    """Сохранение в небе и космосе: после обновления страницы червь в своей зоне, в полёте, а не под землёй."""
+    seed_shop(b, coins=0, tier=14, tutorial=255)
+    boot(b, URL, choose=False)
+    time.sleep(0.6)
+    s = state(b)
+    check('сохранение: на 14-м тире после загрузки зона «небо», червь в полёте над землёй', s['zone'] == 'sky' and s['flight'] is True and s['y'] < 0, f"{s['zone']}, y={s['y']}")
+    b.eval("window.__dev.setTier(18); 0")
+    time.sleep(0.4)
+    b.open(URL)
+    b.wait_for('!!window.__dev', 30)
+    time.sleep(0.8)
+    s = state(b)
+    check('сохранение: после F5 на 18-м тире зона «космос», червь над Землёй', s['zone'] == 'space' and s['tier'] == 18 and s['flight'] is True and 'earth' in s['air'], f"{s['zone']}, {s['tier']}")
+    check('сохранение: нет ошибок в консоли', not b.errors(), str(b.errors()))
+
+
+AIR_LADDER = [('plane', 13), ('heli', 13), ('fighter', 13), ('heavy', 13), ('airliner', 14), ('cargo', 15), ('cargoXL', 16),
+              ('sat', 17), ('station', 17), ('rockS', 18), ('rockM', 19), ('rockL', 20), ('moon', 20), ('earth', 21)]
+
+
+def t_air(b, shots):
+    """Добыча неба и космоса: лесенка съедобности по тирам, поедание, очки, монеты, подсветка, касание астероидов, ракеты истребителей."""
+    zone2_start(b, tier=13)
+    far_air(b, 13)
+    bad = []
+    for kind, first in AIR_LADDER:
+        # лёгкая добыча неба (самолёты, вертолёты, истребитель, тяжёлый вертолёт) по размеру съедобна и на 12-м тире, но в небо попадают с 13-го
+        for tier in ((first,) if first == 13 else (first - 1, first)):
+            b.eval("window.__dev.setTier(%d); window.__dev.scene.worm.scale = window.__dev.scene.worm.targetScale; 0" % tier)
+            b.eval("window.__dev.placeAir('%s', 3e12, -1e11); 0" % kind)
+            ok = b.eval("(function(){var g=window.__dev.scene; return g.air.isEdible(window.__test_air, g.worm.mouthRadius, %d)})()" % tier)
+            if ok != (tier >= first):
+                bad.append((kind, tier, ok))
+    check('лесенка: самолёты и вертолёты с 13-го тира, лайнеры с 14-го, грузовики с 15-го, гиганты с 16-го, спутники с 17-го, астероиды с 18-20-го, Луна с 20-го, Земля с 21-го', not bad, str(bad))
+    # поедание в небе: самолёт перед пастью
+    zone2_start_again(b, 13)
+    far_air(b, 13)
+    g0 = state(b)
+    place_air(b, 'plane', 0.0)
+    time.sleep(0.9)
+    s = state(b)
+    check('небо: самолёт съеден, 30 очков роста, монеты начислены', s['eaten'] == g0['eaten'] + 1 and abs((s['growth'] - g0['growth']) - 30) < 0.01 and s['coins'] > g0['coins'], f"{g0['eaten']}->{s['eaten']}, {g0['growth']}->{s['growth']}, монеты {g0['coins']}->{s['coins']}")
+    b.eval("window.__dev.placeAir('heli', window.__dev.scene.worm.mouth().x + 80000, window.__dev.scene.worm.mouth().y); window.__dev.scene.air.items.forEach(function(i){i.vx=0}); 0")
+    time.sleep(0.4)
+    check('небо: подсветка у съедобной добычи', b.eval("window.__dev.scene.air.items.some(function(i){return i.halo.visible})") is True)
+    # космос: добыча много меньше пасти даёт меньше очков
+    zone2_start_again(b, 18)
+    far_air(b, 18)
+    g1 = state(b)
+    place_air(b, 'sat', 0.0)
+    time.sleep(0.9)
+    s = state(b)
+    share = 1e5 / (60 * g1['scale'])
+    check('космос: спутник на 18-м тире даёт долю очков по размеру (140 × радиус / пасть)', abs((s['growth'] - g1['growth']) - 140 * share) < 3, f"{g1['growth']} -> {s['growth']}, ждали {140 * share:.1f}")
+    # касание не по зубам: астероид бьёт и отбрасывает
+    zone2_start_again(b, 17)
+    far_air(b, 17)
+    b.eval("window.__dev.freeze(false); window.__dev.scene.hpGrace = 0; window.__dev.scene.worm.heading = 0; 0")
+    hp0 = state(b)['hp']
+    b.eval("(function(){var w=window.__dev.scene.worm; var m=w.mouth(); window.__dev.placeAir('rockS', m.x + 6e5, m.y); return 0})()")
+    time.sleep(1.2)
+    s = state(b)
+    hd = b.eval('window.__dev.scene.worm.heading')
+    check('космос: астероид не по зубам бьёт при касании (-10) и отбрасывает червя', abs((hp0 - s['hp']) - 10) < 1.5 or s['hp'] <= hp0 - 9, f"hp {hp0} -> {s['hp']}, курс {hd:.2f}")
+    # истребитель стреляет
+    zone2_start_again(b, 14)
+    far_air(b, 14)
+    b.eval("window.__dev.scene.air.items.forEach(function(i){i.x += 1e12}); 0")
+    b.eval("(function(){var g=window.__dev.scene, w=g.worm, c=g.cameras.main; window.__dev.placeAir('fighter', w.x + 0.3 * c.height / c.zoom, w.y - 0.05 * c.height / c.zoom); return 0})()")
+    t0 = time.time()
+    shot = False
+    while time.time() - t0 < 8:
+        if state(b)['shots'] > 0:
+            shot = True
+            break
+        time.sleep(0.1)
+    check('небо: истребитель стреляет ракетами в червя', shot)
+    b.eval("window.__dev.freeze(true); 0")
+    check('небо и космос: нет ошибок в консоли', not b.errors(), str(b.errors()))
+
+
+def far_air(b, tier):
+    """Червь в небе (с 17-го в космосе) далеко от стартовой расстановки; стоит на месте (freeze); чужой добычи рядом нет."""
+    b.eval("window.__dev.autopilot(false); window.__dev.freeze(true); window.__dev.scene.hpGrace = 1e9; 0")
+    if tier >= 17:
+        b.eval("window.__dev.setPos(0, -%f); window.__dev.freeze(true); 0" % (SPACE_TOP * 0.4))
+    else:
+        b.eval("window.__dev.setPos(0, -%f * window.__dev.scene.worm.scale * 0.2); window.__dev.freeze(true); 0" % (sky_top(1) * 0.6))
+    b.eval("window.__dev.scene.air.items.forEach(function(i){ if (!i.fixed) i.x += 1e13 }); 0")
+    time.sleep(0.4)
+
+
+def zone2_start_again(b, tier):
+    b.eval("window.__dev.setTier(%d); window.__dev.scene.worm.scale = window.__dev.scene.worm.targetScale; 0" % tier)
+    time.sleep(0.3)
+
+
+def place_air(b, kind, dx):
+    """Поставить добычу неба или космоса перед ртом червя (dx в масштабах червя) на высоте рта."""
+    return b.eval("(function(){var w=window.__dev.scene.worm, m=w.mouth(); return window.__dev.placeAir('%s', m.x + %f * w.scale, m.y)})()" % (kind, dx))
+
+
+def t_final(b, shots):
+    """Финал: на последнем тире Землю можно съесть; ролик, концовка, титры, кнопки «Играть дальше» и «Заново с улучшениями», сохранение."""
+    zone2_start(b, tier=21, up=(2, 1, 3), coins=500)
+    s = state(b)
+    check('финал: на 21-м тире зона «космос», Земля есть и съедобна', s['zone'] == 'space' and 'earth' in s['air'], f"{s['zone']}")
+    b.eval("window.__dev.freeze(false); window.__dev.scene.hpGrace = 1e9; 0")
+    time.sleep(0.8)
+    shown = b.eval("window.__dev.scene.tutArrow.visible")
+    check('финал: стрелка показывает, где Земля', shown is True, str(shown))
+    b.screenshot(shots / 'g42-final-approach.png')
+    # лететь вниз к Земле
+    b.eval("window.__dev.setPos(0, -5e7); window.__dev.scene.worm.heading = Math.PI/2; 0")
+    t0 = time.time()
+    while time.time() - t0 < 6 and not state(b)['finale']:
+        time.sleep(0.1)
+    check('финал: Земля укушена, начался финальный ролик', state(b)['finale'] is True)
+    time.sleep(1.0)
+    b.screenshot(shots / 'g43-final-bite.png')
+    t0 = time.time()
+    while time.time() - t0 < 6 and not state(b)['ending']:
+        time.sleep(0.1)
+    s = state(b)
+    check('финал: показан экран концовки, игра стоит', s['ending'] is True and b.eval("window.__dev.scene.scene.isActive('End')") is True)
+    check('финал: концовка записана в сохранение', save_field(b, 'end') == 1, str(save_field(b, 'end')))
+    check('финал: Земли в мире больше нет', 'earth' not in s['air'], str(s['air'][:5]))
+    b.screenshot(shots / 'g44-ending.png')
+    # раскладка на любых размерах
+    js = """(function(){var e=window.__dev.scene.scene.get('End'), u=e.u; function bb(o){var g=o.getBounds(); return [g.x,g.y,g.width,g.height]}
+      return {W:e.scale.width, H:e.scale.height, u:u, title:bb(e.title), story:bb(e.story), credits:bb(e.credits), btns:e.btns.map(function(b){return b.rect}), btnText:e.btns.map(function(b){return bb(b.text)})}})()"""
+    for (w, h, dpr, mobile) in ((1280, 720, 1, False), (1920, 1080, 1, False), (844, 390, 3, True), (568, 320, 2, True), (360, 640, 2, True), (320, 568, 2, True), (700, 1400, 1, False)):
+        b.set_viewport(w, h, dpr, mobile)
+        time.sleep(0.8)
+        r = b.eval(js)
+        parts = [r['title'], r['story'], r['credits']] + r['btns']
+        ok = all(rect_inside(p, r['W'], r['H']) for p in parts) and all(rect_inside(p, r['W'], r['H']) for p in r['btnText'])
+        ok = ok and not rects_overlap(r['title'], r['story']) and not rects_overlap(r['story'], r['btns'][0]) and not rects_overlap(r['btns'][0], r['btns'][1])
+        ok = ok and all(bt[3] / r['u'] >= 44 for bt in r['btns'])
+        check(f'концовка {w}x{h}: всё на экране, не накладывается, кнопки от 44 CSS-px', ok, str(r))
+    b.set_viewport(1280, 720, 1, False)
+    time.sleep(0.5)
+    # «Играть дальше»
+    b.key('Enter')
+    time.sleep(0.6)
+    s = state(b)
+    check('концовка: Enter закрывает её, игра продолжается, Земли нет', s['ending'] is False and b.eval("window.__dev.scene.scene.isActive('End')") is False and 'earth' not in s['air'], str(s['ending']))
+    time.sleep(0.5)
+    # «Заново с улучшениями»: рост с нуля, улучшения, монеты и персонаж остаются
+    b.eval("window.__dev.scene.showEnding(); 0")
+    time.sleep(0.5)
+    btn = b.eval("window.__dev.scene.scene.get('End').btns[1].rect")
+    click_canvas(b, btn)
+    time.sleep(1.5)
+    b.wait_for('!!window.__dev', 30)
+    time.sleep(0.8)
+    s = state(b)
+    check('«Заново с улучшениями»: тир 1, улучшения и монеты на месте, концовка засчитана', s['tier'] == 1 and s['up'] == {'jump': 2, 'hp': 1, 'speed': 3} and s['coins'] >= 500 and s['zone'] == 'under' and s['end'] == 1,
+          f"tier={s['tier']}, up={s['up']}, coins={s['coins']}, zone={s['zone']}, end={s['end']}")
+    check('финал: нет ошибок в консоли', not b.errors(), str(b.errors()))
+
+
+def t_air_challenges(b, shots):
+    """Испытания в небе и космосе: наземные заменяются, появляются «самолёты» и «спутники и астероиды», засчитываются съеденным."""
+    seed_shop(b, coins=0, tier=14, tutorial=255, ch='[{"k":"people","n":5,"p":0,"r":10},{"k":"beetle","n":5,"p":0,"r":10},{"k":"planes","n":3,"p":0,"r":10}]')
+    boot(b, URL, choose=False)
+    kinds = [c['k'] for c in state(b)['challenges']]
+    check('испытания: на 14-м тире наземные («люди», «жуки») заменены, «самолёты» остались', 'people' not in kinds and 'beetle' not in kinds and 'planes' in kinds, str(kinds))
+    far_air(b, 14)
+    b.eval("window.__dev.freeze(false); 0")
+    p0 = [c for c in state(b)['challenges'] if c['k'] == 'planes'][0]['p']
+    place_air(b, 'plane', 0.0)
+    time.sleep(0.9)
+    p1 = [c for c in state(b)['challenges'] if c['k'] == 'planes'][0]['p']
+    check('испытания: съеденный самолёт засчитан', p1 == p0 + 1, f'{p0} -> {p1}')
+    b.eval("window.__dev.setTier(18); 0")
+    time.sleep(0.4)
+    kinds = [c['k'] for c in state(b)['challenges']]
+    check('испытания: в космосе «самолёты» заменены', 'planes' not in kinds, str(kinds))
+    check('испытания: нет ошибок в консоли', not b.errors(), str(b.errors()))
+
+
+def t_air_pace(b, shots):
+    """Автопилот в небе и космосе ест, растёт и доходит до финала без залипаний."""
+    zone2_start(b, tier=13)
+    b.eval('window.__dev.autopilot(true); window.__dev.freeze(false); 0')
+    g0 = state(b)
+    t0 = time.time()
+    while time.time() - t0 < 30 and state(b)['eaten'] - g0['eaten'] < 12:
+        time.sleep(0.5)
+        if state(b)['stunShown']:
+            b.eval('window.__dev.respawn(); 0')
+    s = state(b)
+    check('небо: автопилот за 30 секунд съел не меньше 12 и растёт', s['eaten'] - g0['eaten'] >= 12 or s['tier'] > 13, f"{g0['eaten']} -> {s['eaten']}, тир {s['tier']}")
+    b.eval("window.__dev.setTier(17); window.__dev.scene.hpGrace = 1e9; 0")
+    time.sleep(0.5)
+    g1 = state(b)
+    t0 = time.time()
+    while time.time() - t0 < 40 and state(b)['eaten'] - g1['eaten'] < 10:
+        time.sleep(0.5)
+        if state(b)['stunShown']:
+            b.eval('window.__dev.respawn(); 0')
+    s = state(b)
+    check('космос: автопилот за 40 секунд съел не меньше 10 и растёт', s['eaten'] - g1['eaten'] >= 10 or s['tier'] > 17, f"{g1['eaten']} -> {s['eaten']}, тир {s['tier']}")
+    b.eval('window.__dev.autopilot(false); 0')
+    check('небо и космос: автопилот без ошибок в консоли', not b.errors(), str(b.errors()))
+
+
 TESTS = {
     'boot': t_boot, 'growth': t_autopilot_growth, 'jump': t_jump, 'wings': t_wings, 'skins': t_skins,
     'sdk': t_sdk, 'lang': t_lang, 'audio': t_audio, 'tiers': t_tiers,
@@ -1857,6 +2175,7 @@ TESTS = {
     'gear': t_gear, 'shop': t_shop, 'shopguard': t_shop_guard, 'shopsizes': t_shop_sizes, 'challenges': t_challenges, 'shopen': t_shop_english,
     'z2world': t_zone2_world, 'z2eat': t_zone2_eat, 'z2danger': t_zone2_danger, 'z2armor': t_zone2_armor, 'z2hud': t_zone2_hud, 'z2pace': t_zone2_pace, 'z2hints': t_zone2_hints,
     'scale': t_scale, 'flight': t_flight, 'rockets': t_rockets,
+    'zones': t_zones, 'zonesave': t_zone_save, 'air': t_air, 'final': t_final, 'airch': t_air_challenges, 'airpace': t_air_pace,
 }
 
 

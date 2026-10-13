@@ -77,6 +77,16 @@ const ru = {
   hint_surface: 'Люди разбегаются! Прыгайте за ними. Под землёй безопасно, там здоровье восстанавливается',
   hint_guard: 'Осторожно: техника охраны стреляет. Уходите под землю, чтобы переждать',
   hint_wings: 'Крылья: цель выше червя — взмахи и подъём, вровень — парение, ниже — пикирование',
+  zone_sky: 'Небо! Червь плывёт по воздуху. Ешьте самолёты и вертолёты, берегитесь ракет',
+  zone_space: 'Космос! Внизу Земля. Ешьте спутники и астероиды; крупные астероиды бьются',
+  zone_final: 'Вы доросли до Земли! Летите вниз и съешьте её',
+  ch_planes: 'Съешьте самолёты и вертолёты: {n}',
+  ch_space: 'Съешьте спутники и астероиды: {n}',
+  end_title: 'Ням! Вы съели Землю!',
+  end_story: 'Крошечный голодный червячок вырос до размеров планеты и закусил самой Землёй. Космос теперь ваш: летайте и ешьте, что осталось.',
+  end_credits: 'Идея и игра: автор проекта\nСпасибо, что играли!',
+  end_continue: 'Играть дальше',
+  end_restart: 'Заново, с улучшениями',
 } as const;
 
 export type TextKey = keyof typeof ru;
@@ -156,6 +166,16 @@ const en: Record<TextKey, string> = {
   hint_surface: 'People are running! Leap after them. Underground is safe and heals you',
   hint_guard: 'Careful: guard machines shoot. Dive underground to wait it out',
   hint_wings: 'Wings: aim above the worm to climb, level to hover, below to dive',
+  zone_sky: 'The sky! The worm swims through the air. Eat planes and helicopters, beware of rockets',
+  zone_space: 'Space! Earth is below. Eat satellites and asteroids; big asteroids hit hard',
+  zone_final: 'You have grown to the size of the Earth! Fly down and eat it',
+  ch_planes: 'Eat planes and helicopters: {n}',
+  ch_space: 'Eat satellites and asteroids: {n}',
+  end_title: 'Yum! You ate the Earth!',
+  end_story: 'A tiny hungry worm grew to the size of a planet and snacked on the Earth itself. Space is yours now: fly around and eat what is left.',
+  end_credits: 'Idea and game: the project author\nThanks for playing!',
+  end_continue: 'Keep playing',
+  end_restart: 'Restart with upgrades',
 };
 
 const dict: Record<Lang, Record<TextKey, string>> = { ru, en };

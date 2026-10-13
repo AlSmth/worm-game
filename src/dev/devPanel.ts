@@ -1,6 +1,7 @@
 import type { SkinId } from '../data/skins';
 import type { ChallengeKind } from '../data/challenges';
 import type { SurfaceKind } from '../data/surface';
+import type { AirKind } from '../data/air';
 
 /** Панель разработчика: только в dev-сборке (в релиз не попадает, п. 1.14: никакой «кухни» на экране). */
 export interface DevApi {
@@ -16,6 +17,7 @@ export interface DevApi {
   openSelect(): void;
   openShop(): void;
   placeSurface(kind: SurfaceKind, x: number): { r: number; cy: number; w: number; h: number };
+  placeAir(kind: AirKind, x: number, y: number): { r: number; w: number; h: number };
   setHp(n: number): void;
   hit(n: number): void;
   hurt(n: number): void;

@@ -2,7 +2,9 @@ import Phaser from 'phaser';
 import { Worm, type Steer } from '../game/Worm';
 import { PreySystem, type PreyItem, type View } from '../game/Prey';
 import { TreasureSystem, type TreasureItem } from '../game/Treasure';
-import { SurfaceSystem, type SurfaceItem, type WormInfo, type BodyCircle } from '../game/Surface';
+import { SurfaceSystem, type SurfaceItem } from '../game/Surface';
+import { AirSystem, type AirItem } from '../game/Air';
+import { RocketSystem, type BodyCircle, type WormInfo } from '../game/Rockets';
 import { Challenges, type ChallengeDone } from '../game/Challenges';
 import type { ChallengeKind } from '../data/challenges';
 import { WorldBackground } from '../game/Background';
@@ -13,9 +15,10 @@ import { hideLoader } from '../core/loader';
 import { state, hitsUi, showToast } from '../core/state';
 import { platform } from '../platform/platform';
 import { save, TUTORIAL_COIN, TUTORIAL_EAT, TUTORIAL_GUARD, TUTORIAL_SURFACE, TUTORIAL_WINGS } from '../platform/save';
-import { MAX_TIER, econScale, growthFor, growthNeeded, segmentsAt, wormScale } from '../data/growth';
+import { MAX_TIER, econScale, growthFor, growthNeeded, segmentsAt, viewScale, wormScale } from '../data/growth';
 import { clampLevel, type LineId, type Upgrades } from '../data/upgrades';
-import { SURFACE_TIER, WORLD_WIDTH, worldHalf } from '../data/world';
+import { EARTH_R, FINAL_TIER, SURFACE_TIER, WORLD_WIDTH, skyTop, spaceHalf, spaceTop, worldHalf, zoneOf, type Zone } from '../data/world';
+import { AIR_REGEN, AIR_REGEN_DELAY, type AirKind } from '../data/air';
 import { HIT_GRACE, HP_REGEN, RESPAWN_GRACE, SOIL_GROWTH_FACTOR, maxHp, type SurfaceKind } from '../data/surface';
 import type { SkinId } from '../data/skins';
 import { mountDevPanel, type DevApi } from '../dev/devPanel';
@@ -23,6 +26,11 @@ import { mountDevPanel, type DevApi } from '../dev/devPanel';
 /** Сколько px мира видно при масштабе червя 1: не меньше, чем по высоте, и не меньше, чем по ширине (узкие окна). */
 const BASE_VIEW_H = 900;
 const BASE_VIEW_W = 1100;
+/** Где червь появляется в космосе: над Землёй, у самого края кадра виден её горизонт (но не выше половины арены). */
+function spaceStartY(S: number): number {
+  return -Math.min(0.5 * spaceTop(S), 0.42 * BASE_VIEW_H * viewScale(S));
+}
+
 const NO_STEER: Steer = { mode: 'none', tx: 0, ty: 0, dx: 0, dy: 0 };
 const DIRT = [0x6b4a32, 0x8a5a3a, 0x4a2f1f, 0xa07048];
 const STARS = [0xffd23f, 0xffffff, 0xff9a2e];
@@ -33,6 +41,18 @@ export class GameScene extends Phaser.Scene {
   prey!: PreySystem;
   treasure!: TreasureSystem;
   surface!: SurfaceSystem;
+  air!: AirSystem;
+  rockets!: RocketSystem;
+  /** Зона мира по тиру: под землёй, на поверхности, в небе, в космосе. */
+  zone: Zone = 'under';
+  /** Ролик перехода между зонами («прорыв»): червь летит по сценарию, ввод заблокирован. */
+  private cine: { to: Zone; t: number; dur: number; x0: number; y0: number; switched: boolean } | null = null;
+  /** Секунд без ранений: в небе и космосе здоровье возвращается само после паузы. */
+  private calm = 0;
+  /** Белая вспышка уже запущена (ролик перехода в космос). */
+  private camFade = false;
+  /** Земля укушена: идёт финал. */
+  private finale = false;
   private bg!: WorldBackground;
   private fx!: Fx;
   private pointerActive = false;
@@ -86,11 +106,14 @@ export class GameScene extends Phaser.Scene {
 
     const tf = this.fractionalTier();
     const S0 = wormScale(tf);
-    this.worm = new Worm(this, d.skin, 0, 260 * S0);
+    this.zone = zoneOf(state.tier);
+    // с 13-го тира червь начинает в небе, с 17-го в космосе (ролик перехода показывается один раз при росте)
+    const y0 = this.zone === 'sky' ? -0.06 * skyTop(S0) : this.zone === 'space' ? spaceStartY(S0) : 260 * S0;
+    this.worm = new Worm(this, d.skin, 0, y0);
     this.worm.setUpgrades(d.up);
     this.worm.setSize(S0, segmentsAt(tf));
     this.worm.scale = S0;
-    this.worm.reset(0, 260 * S0, 0);
+    this.worm.reset(0, y0, 0);
     this.worm.onExit = () => this.onExit();
     this.worm.onEnter = () => this.onEnter();
     this.worm.onBump = () => this.onBump();
@@ -100,14 +123,21 @@ export class GameScene extends Phaser.Scene {
     this.treasure = new TreasureSystem(this, (x, y) => this.glint(x, y));
     this.tutArrow = this.add.image(0, 0, 'fx', 'fx-arrow').setDepth(600).setVisible(false);
     this.updateCamera(0, true);
-    this.surface = new SurfaceSystem(this, {
+    this.rockets = new RocketSystem(this, {
       onShoot: (x, y, len, ang) => this.onRocketLaunch(x, y, len, ang),
       onTrail: (x, y, len) => this.onRocketTrail(x, y, len),
       onExplode: (x, y, len, dmg, direct) => this.onRocketBoom(x, y, len, dmg, direct),
     });
-    this.prey.populate(0, this.worm.y, S0, this.view(), state.tier);
-    this.treasure.populate(0, this.worm.y, S0, this.view());
-    this.surface.populate(0, S0, this.view(), state.tier);
+    this.surface = new SurfaceSystem(this, this.rockets);
+    this.air = new AirSystem(this, this.rockets);
+    if (this.zone === 'sky' || this.zone === 'space') {
+      this.applyZone();
+      this.air.populate(0, this.worm.y, S0, this.view(), state.tier);
+    } else {
+      this.prey.populate(0, this.worm.y, S0, this.view(), state.tier);
+      this.treasure.populate(0, this.worm.y, S0, this.view());
+      this.surface.populate(0, S0, this.view(), state.tier);
+    }
 
     this.setupInput();
     platform.onPause((p) => this.onPlatformPause(p));
@@ -124,6 +154,8 @@ export class GameScene extends Phaser.Scene {
       }
     });
     this.game.events.on('respawn', () => this.respawn());
+    this.game.events.on('end-continue', () => this.endContinue());
+    this.game.events.on('end-restart', () => this.endRestart());
     this.game.events.on('shop-closed', (bought: boolean) => this.onShopClosed(bought));
 
     this.scene.launch('UI');
@@ -179,7 +211,7 @@ export class GameScene extends Phaser.Scene {
     this.input.addPointer(2);
     const onPointer = (p: Phaser.Input.Pointer, down: boolean) => {
       if (down) sfx.unlock();
-      if (state.selecting || state.shopOpen || hitsUi(p.x, p.y)) return;
+      if (state.selecting || state.shopOpen || state.ending || hitsUi(p.x, p.y)) return;
       if (p.wasTouch && !p.isDown) return;
       this.pointerActive = true;
       this.pointer.x = p.x;
@@ -210,6 +242,7 @@ export class GameScene extends Phaser.Scene {
   /** Автопилот для проверки и показа: плывёт к ближайшей съедобной добыче, на поверхности прыгает за людьми; при малом здоровье ныряет. */
   private autoSteer(): Steer {
     const w = this.worm;
+    if (this.zone === 'sky' || this.zone === 'space') return this.autoSteerAir();
     // здоровье на исходе: прочь под землю, там оно восстанавливается
     if (w.canExit && state.hp < state.hpMax * 0.45) return { mode: 'target', tx: w.x + 300, ty: w.y + 900 * w.scale, dx: 0, dy: 0 };
     let tx = w.x + 400;
@@ -239,9 +272,71 @@ export class GameScene extends Phaser.Scene {
     return { mode: 'target', tx, ty, dx: 0, dy: 0 };
   }
 
+  /** Автопилот в небе и космосе: к ближайшей съедобной добыче (на 21-м тире к Земле), при малом здоровье прочь от ракет и охраны. */
+  private autoSteerAir(): Steer {
+    const w = this.worm;
+    if (state.hp < state.hpMax * 0.4) {
+      let bx = 0;
+      let by = 0;
+      let bd = Infinity;
+      for (const r of this.rockets.shots) {
+        const dd = Math.hypot(r.x - w.x, r.y - w.y);
+        if (dd < bd) {
+          bd = dd;
+          bx = r.x;
+          by = r.y;
+        }
+      }
+      for (const it of this.air.items) {
+        if (it.dying || !it.spec.guard) continue;
+        const dd = Math.hypot(it.x - w.x, it.y - w.y);
+        if (dd < bd) {
+          bd = dd;
+          bx = it.x;
+          by = it.y;
+        }
+      }
+      if (bd < Infinity) return { mode: 'target', tx: w.x + (w.x - bx) * 3, ty: w.y + (w.y - by) * 3, dx: 0, dy: 0 };
+    }
+    // цели нет (например, червь нырнул под землю): вверх, в середину неба или космоса
+    let tx = w.x + 400 * w.scale;
+    let ty = this.zone === 'sky' ? -0.2 * skyTop(w.scale) : spaceStartY(w.scale);
+    let bd = Infinity;
+    for (const it of this.air.items) {
+      if (it.dying || !this.air.isEdible(it, w.mouthRadius * 0.95, state.tier)) continue;
+      const isEarth = it.spec.kind === 'earth';
+      // Земля на последнем тире важнее всего; остальное по расстоянию, крупное чуть привлекательнее
+      const dd = isEarth ? 0 : Math.hypot(it.x - w.x, it.y - w.y) / (1 + it.spec.points / 400);
+      if (dd < bd) {
+        bd = dd;
+        tx = it.x;
+        ty = isEarth ? it.y - it.r * 0.8 : it.y;
+      }
+    }
+    // обход твёрдого: астероиды и Луна не по зубам бьются, поэтому курс отводим от них
+    let ax = tx - w.x;
+    let ay = ty - w.y;
+    const len = Math.hypot(ax, ay) || 1;
+    ax /= len;
+    ay /= len;
+    for (const it of this.air.items) {
+      if (it.dying || !it.spec.touch || it.r <= w.mouthRadius) continue;
+      const dx = w.x - it.x;
+      const dy = w.y - it.y;
+      const d = Math.hypot(dx, dy) || 1;
+      const reach = it.r * 1.25 + w.headRadius * 3;
+      if (d > reach) continue;
+      const push = Math.pow(1 - d / reach, 0.7) * 2.2;
+      ax += (dx / d) * push;
+      ay += (dy / d) * push;
+    }
+    const norm = Math.hypot(ax, ay) || 1;
+    return { mode: 'target', tx: w.x + (ax / norm) * len, ty: w.y + (ay / norm) * len, dx: 0, dy: 0 };
+  }
+
   // ---------- шаг ----------
   override update(time: number, delta: number): void {
-    if (state.paused || state.selecting || state.shopOpen) return;
+    if (state.paused || state.selecting || state.shopOpen || state.ending) return;
     if (state.stunShown) {
       // окно «Заново» открыто: игра стоит, звёздочки над головой продолжают кружить
       this.updateStars(time);
@@ -250,42 +345,49 @@ export class GameScene extends Phaser.Scene {
     const dt = Math.min(delta / 1000, 0.05);
     const w = this.worm;
     w.canExit = state.tier >= SURFACE_TIER;
-    w.stunned = state.stunned || this.freeze;
+    this.applyZone();
+    w.stunned = state.stunned || this.freeze || this.cine !== null || this.finale;
+    if (this.cine) this.updateCine(dt);
     w.update(dt, w.stunned ? NO_STEER : this.readSteer(), time);
     const view = this.view();
-    this.prey.update(dt, time / 1000, w.x, w.y, w.scale, view, state.tier, w.mouthRadius);
-    this.treasure.econ = econScale(state.tier);
-    this.treasure.update(dt, time / 1000, w.x, w.y, w.scale, view, w.mouthRadius);
-    this.updateSurface(dt, time, view);
-    if (!state.stunned) this.checkEating(time);
+    if (this.zone === 'under' || this.zone === 'ground') {
+      this.prey.update(dt, time / 1000, w.x, w.y, w.scale, view, state.tier, w.mouthRadius);
+      this.treasure.econ = econScale(state.tier);
+      this.treasure.update(dt, time / 1000, w.x, w.y, w.scale, view, w.mouthRadius);
+    }
+    this.updateThreats(dt, time, view);
+    if (!state.stunned && !this.cine && !this.finale) this.checkEating(time);
     this.dig(dt);
     this.updateTutorial(time);
     this.updateTrail(dt);
     this.trackJump();
     this.updateCamera(dt, false);
-    this.bg.update(this.cameras.main, w.scale);
+    this.bg.update(this.cameras.main, w.scale, this.zone);
     this.fx.update(dt);
     this.updateStars(time);
   }
 
+  /** Размеры вида в px мира при установившемся приближении (камера плавно догоняет, но расстановку считаем по итоговому виду). */
   private view(): View {
     const c = this.cameras.main;
-    return { w: c.width / c.zoom, h: c.height / c.zoom };
+    const k = viewScale(this.worm ? this.worm.scale : 1);
+    const zoom = Math.min(c.height / (BASE_VIEW_H * k), c.width / (BASE_VIEW_W * k));
+    return { w: c.width / zoom, h: c.height / zoom };
   }
 
   private updateCamera(dt: number, snap: boolean): void {
     const cam = this.cameras.main;
     const w = this.worm;
     const S = w.scale;
-    const viewH = BASE_VIEW_H * Math.pow(S, 0.85);
-    const viewW = BASE_VIEW_W * Math.pow(S, 0.85);
+    const viewH = BASE_VIEW_H * viewScale(S);
+    const viewW = BASE_VIEW_W * viewScale(S);
     this.camKick = Math.max(0, this.camKick - dt * 0.12);
     const targetZoom = Math.min(cam.height / viewH, cam.width / viewW) * (1 - this.camKick);
     if (snap || !this.camReady) cam.setZoom(targetZoom);
     else cam.setZoom(cam.zoom + (targetZoom - cam.zoom) * Math.min(1, 3 * dt));
     // камера не показывает пустоту за стенами карты: у края останавливается, оставляя видимой полосу стены
     const visW = cam.width / cam.zoom;
-    const half = worldHalf(S);
+    const half = this.zone === 'space' ? spaceHalf(S) : worldHalf(S);
     const minC = -half + visW * 0.42;
     const maxC = half - visW * 0.42;
     const rawX = w.x + w.vx * 0.22;
@@ -342,7 +444,47 @@ export class GameScene extends Phaser.Scene {
         else if (c === 'near') near = true;
       }
     }
+    // небо и космос: добыча в воздухе; Землю червь кусает, когда пасть достала до её поверхности (финал)
+    if (this.zone === 'sky' || this.zone === 'space') {
+      for (const it of this.air.items) {
+        if (it.dying || !this.air.isEdible(it, mr, state.tier)) continue;
+        if (it.spec.kind === 'earth') {
+          if (Math.hypot(m.x - it.x, m.y - it.y) < it.r * 0.92 + mr * 0.2) this.eatEarth(it, m);
+          continue;
+        }
+        const c = consider(it.x, it.y, it.r);
+        if (c === 'eat') this.eatAir(it, m, now);
+        else if (c === 'near') near = true;
+      }
+    }
     w.setHint(near ? 'open' : 'idle');
+  }
+
+  /** Добыча в небе или космосе съедена: самолёты, вертолёты, спутники, станции, астероиды, Луна. */
+  private eatAir(it: AirItem, m: { x: number; y: number }, now: number): void {
+    const w = this.worm;
+    const big = it.r > w.mouthRadius * 0.45;
+    sfx.play(big ? 'chest' : 'eat');
+    w.flash('chomp', 180, now);
+    w.gulp(0.1 + Math.min(0.14, it.r / (w.mouthRadius * 7)));
+    this.fx.pop(m.x, m.y, 1, Math.max(120 * w.scale, Math.min(it.r * 1.8, w.mouthRadius * 2.6)));
+    this.fx.burst(m.x, m.y, w.scale, { count: big ? 12 : 7, frame: 'fx-star', colors: STARS, speed: 420, life: 0.6, gravity: 0, size: big ? 28 : 22 });
+    this.fx.burst(it.x, it.y, 1, { count: big ? 5 : 2, frame: 'fx-dust-poof', colors: [0xf2eee8], speed: it.r * 0.25, life: 0.8, gravity: 0, size: Math.max(it.w * 0.4, 70) });
+    this.air.consume(it, m.x, m.y);
+    this.eaten++;
+    this.quest('eat', 1);
+    this.quest(it.spec.zone === 'sky' ? 'planes' : 'space', 1);
+    // в космосе добыча, которая намного меньше пасти, даёт мало очков: рост идёт за счёт добычи по зубам
+    const share = it.spec.zone === 'space' ? Math.min(1, Math.max(0.04, it.r / w.mouthRadius)) : 1;
+    this.addGrowth(it.spec.points * share);
+    this.markEaten();
+    const coins = Math.round(it.spec.coins * econScale(state.tier));
+    if (coins > 0) {
+      state.coins += coins;
+      save.patch({ coins: state.coins });
+      this.quest('coins', coins);
+      this.fx.floatText(m.x, m.y - 40 * w.scale, w.scale, `+${coins}`);
+    }
   }
 
   private eat(it: PreyItem, m: { x: number; y: number }, now: number): void {
@@ -466,6 +608,153 @@ export class GameScene extends Phaser.Scene {
     }
     // поверхность открывается при пересечении порога, даже если одним укусом перескочили через тир
     if (tierBefore < SURFACE_TIER && state.tier >= SURFACE_TIER) this.surfaceUnlocked();
+    // небо и космос: ролик «прорыва», потом червь плывёт по воздуху и пустоте
+    const z = zoneOf(state.tier);
+    if (z !== this.zone && (z === 'sky' || z === 'space') && !this.cine) this.beginCine(z);
+    if (tierBefore < FINAL_TIER && state.tier >= FINAL_TIER) showToast('zone_final', 8);
+  }
+
+  // ---------- зоны ----------
+  /** Пределы червя по зоне: в небе потолок атмосферы, в космосе стены арены и Земля внизу (до последнего тира преграждает путь). */
+  private applyZone(): void {
+    const w = this.worm;
+    const S = w.scale;
+    w.flight = this.zone === 'sky' || this.zone === 'space';
+    w.halfX = this.zone === 'space' ? spaceHalf(S) : null;
+    w.ceilY = this.cine ? -Infinity : this.zone === 'sky' ? -skyTop(S) : this.zone === 'space' ? -spaceTop(S) : -Infinity;
+    w.floorY = this.zone === 'space' ? (state.tier >= FINAL_TIER ? EARTH_R * 2 : -w.headRadius * 1.6) : Infinity;
+  }
+
+  /** Перейти в зону z: убрать чужое, расставить своё; place — поставить червя на место входа (проверки и dev). */
+  private enterZone(z: Zone, place: boolean): void {
+    const w = this.worm;
+    const was = this.zone;
+    this.zone = z;
+    this.rockets.clear();
+    if (z === 'sky' || z === 'space') {
+      this.prey.clear();
+      this.treasure.clear();
+      this.surface.clear();
+      this.air.clear();
+      if (place) w.reset(0, z === 'sky' ? -0.06 * skyTop(w.scale) : spaceStartY(w.scale), 0);
+      this.applyZone();
+      this.air.populate(w.x, w.y, w.scale, this.view(), state.tier);
+    } else {
+      this.air.clear();
+      if (was === 'sky' || was === 'space') {
+        if (place) w.reset(0, 260 * w.scale, 0);
+        this.applyZone();
+        this.prey.populate(w.x, w.y, w.scale, this.view(), state.tier);
+        this.treasure.populate(w.x, w.y, w.scale, this.view());
+        this.surface.populate(w.x, w.scale, this.view(), state.tier);
+      }
+    }
+    this.camReady = false;
+  }
+
+  /** Ролик «прорыв»: червь взлетает по сценарию (ввод закрыт, неуязвим), потом зона меняется и управление возвращается. */
+  private beginCine(to: Zone): void {
+    const w = this.worm;
+    this.cine = { to, t: 0, dur: to === 'sky' ? 2.8 : 3.8, x0: w.x, y0: w.y, switched: false };
+    this.hpGrace = Math.max(this.hpGrace, 8);
+    this.rockets.clear();
+    sfx.play('whoosh');
+    w.flash('happy', 2200, this.time.now);
+    showToast(to === 'sky' ? 'zone_sky' : 'zone_space', 7);
+    this.fx.ring(w.x, w.y, w.scale * 1.6, to === 'sky' ? 0x7fd0ff : 0xffe27a);
+    this.fx.burst(w.x, w.y, w.scale, { count: 26, frame: 'fx-star', colors: STARS, speed: 640, life: 1.0, gravity: 0, size: 30 });
+  }
+
+  private updateCine(dt: number): void {
+    const c = this.cine;
+    if (!c) return;
+    const w = this.worm;
+    const S = w.scale;
+    c.t += dt;
+    const p = Math.min(1, c.t / c.dur);
+    const ease = (v: number) => 1 - Math.pow(1 - Math.max(0, Math.min(1, v)), 3);
+    w.heading = -Math.PI / 2 + Math.sin(c.t * 7) * 0.07;
+    w.speed = w.swimSpeed;
+    this.camKick = Math.max(this.camKick, 0.2 * Math.sin(p * Math.PI) + 0.03);
+    if (c.t * 20 > Math.floor((c.t - dt) * 20) + 1) this.fx.streak(w.x + (Math.random() - 0.5) * 220 * S, w.y + 260 * S, -Math.PI / 2, S * 2, 0xffffff);
+    if (c.to === 'sky') {
+      w.y = c.y0 + (-0.07 * skyTop(S) - c.y0) * ease((p - 0.12) / 0.88);
+      if (p >= 1) {
+        this.cine = null;
+        this.enterZone('sky', false);
+        w.heading = 0;
+        sfx.play('grow');
+      }
+      return;
+    }
+    // космос: вверх до потолка неба, белая вспышка, дальше пустота и Земля внизу
+    if (!c.switched) {
+      const topY = this.zone === 'sky' ? -skyTop(S) : Math.min(c.y0, -skyTop(S));
+      w.y = c.y0 + (topY - c.y0) * ease(p / 0.6);
+      if (p > 0.5 && !this.camFade) {
+        this.camFade = true;
+        this.cameras.main.fadeOut(420, 255, 255, 255);
+      }
+      if (p >= 0.62) {
+        c.switched = true;
+        this.cine = null;
+        this.enterZone('space', false);
+        this.cine = c;
+        w.reset(Math.max(-spaceHalf(S) * 0.5, Math.min(spaceHalf(S) * 0.5, c.x0)), spaceStartY(S), -Math.PI / 2);
+        this.air.clear();
+        this.air.populate(w.x, w.y, S, this.view(), state.tier);
+        this.camReady = false;
+        this.cameras.main.fadeIn(900, 255, 255, 255);
+        this.camFade = false;
+        sfx.play('grow');
+      }
+      return;
+    }
+    if (p >= 1) {
+      this.cine = null;
+      w.heading = 0;
+    }
+  }
+
+  /** Земля укушена: она уходит в пасть, вспышка, затем концовка и титры. */
+  private eatEarth(it: AirItem, m: { x: number; y: number }): void {
+    if (this.finale) return;
+    this.finale = true;
+    const w = this.worm;
+    sfx.play('boom');
+    this.time.delayedCall(250, () => sfx.play('chest'));
+    this.time.delayedCall(700, () => sfx.play('grow'));
+    w.flash('chomp', 600, this.time.now);
+    w.gulp(0.4);
+    this.air.earthGone = true;
+    this.air.consume(it, m.x, m.y, 1600);
+    this.fx.ring(m.x, m.y, w.scale * 2, 0xffe27a);
+    this.fx.burst(m.x, m.y, w.scale, { count: 40, frame: 'fx-star', colors: STARS, speed: 900, life: 1.4, gravity: 0, size: 40 });
+    this.cameras.main.shake(1200, 0.006);
+    this.time.delayedCall(1500, () => this.cameras.main.flash(900, 255, 255, 255));
+    this.quest('eat', 1);
+    save.patch({ end: 1 });
+    this.time.delayedCall(2600, () => this.showEnding());
+  }
+
+  private showEnding(): void {
+    state.ending = true;
+    platform.gameplay(false);
+    this.scene.launch('End');
+    this.scene.bringToTop('End');
+  }
+
+  /** «Играть дальше» после концовки: Земли больше нет, червь свободно летает и ест, что осталось. */
+  private endContinue(): void {
+    state.ending = false;
+    this.finale = false;
+    platform.gameplay(true);
+  }
+
+  /** «Заново с улучшениями»: рост и испытания с нуля, купленные улучшения, монеты и персонаж остаются. */
+  private endRestart(): void {
+    save.patch({ tier: 1, growth: 0, ch: [] });
+    window.location.reload();
   }
 
   /** Червь упёрся в «корку» под травой: подсказываем, что выход откроется с ростом (не чаще раза в несколько секунд). */
@@ -500,6 +789,19 @@ export class GameScene extends Phaser.Scene {
   private updateTutorial(now: number): void {
     const t = save.data.tutorial;
     const w = this.worm;
+    // последний тир: стрелка рядом с червём показывает, где Земля
+    if (this.zone === 'space' && state.tier >= FINAL_TIER && !this.finale && !this.air.earthGone) {
+      const earth = this.air.items.find((it) => it.spec.kind === 'earth' && !it.dying);
+      if (earth) {
+        const ang = Math.atan2(earth.y - w.y, earth.x - w.x);
+        const cam = this.cameras.main;
+        const k = 74 / cam.zoom / 64;
+        const off = w.headRadius * 2.2 + Math.sin(now / 160) * 10 * k * 2;
+        const far = Math.hypot(earth.y - w.y, earth.x - w.x) > earth.r * 1.15;
+        this.tutArrow.setVisible(far).setScale(k).setRotation(ang - Math.PI / 2).setPosition(w.x + Math.cos(ang) * off, w.y + Math.sin(ang) * off);
+        return;
+      }
+    }
     const view = this.view();
     let target: { x: number; y: number; r: number } | null = null;
     let best = Infinity;
@@ -582,31 +884,57 @@ export class GameScene extends Phaser.Scene {
   }
 
   // ---------- опасности и здоровье ----------
-  /** Шаг поверхности: люди, машины, охрана и снаряды; попадания по червю; лечение под землёй. */
-  private updateSurface(dt: number, time: number, view: View): void {
+  /** Шаг угроз: на поверхности люди, машины и охрана, в небе и космосе самолёты и астероиды; ракеты, попадания, лечение. */
+  private updateThreats(dt: number, time: number, view: View): void {
     const w = this.worm;
     this.hpGrace = Math.max(0, this.hpGrace - dt);
     state.hpFlash = Math.max(0, state.hpFlash - dt);
-    // круги тела нужны для попаданий ракет: считаем, только пока ракеты в воздухе и червь у поверхности
-    const near = this.surface.shots.length > 0 && w.y < w.headRadius * 2 + w.scale * 200;
+    this.calm += dt;
+    const flying = this.zone === 'sky' || this.zone === 'space';
+    // круги тела нужны для попаданий ракет и касаний: считаем, когда есть ракеты рядом с поверхностью или червь в полёте
+    const near = flying || (this.rockets.shots.length > 0 && w.y < w.headRadius * 2 + w.scale * 200);
     const circles: BodyCircle[] = near ? w.hitCircles(this.circles) : [];
     const info: WormInfo = {
       x: w.x, y: w.y, vx: w.vx, vy: w.vy, scale: w.scale,
-      exposed: w.y < w.headRadius * 0.7 && !state.stunned,
+      exposed: w.y < w.headRadius * 0.7 && !state.stunned && this.cine === null,
       scary: w.y < w.headRadius * 2.5,
       circles,
     };
-    this.surface.update(dt, info, view, state.tier, w.canExit);
-    this.surface.highlight(w.mouthRadius, w.canExit, time / 1000);
-    // под землёй червь лечится
-    if (!state.stunned && state.hp < state.hpMax && w.y > w.headRadius * 1.1) state.hp = Math.min(state.hpMax, state.hp + HP_REGEN * dt);
+    this.rockets.viewH = view.h;
+    if (this.zone === 'ground') {
+      this.surface.update(dt, info, view, state.tier, w.canExit);
+      this.surface.highlight(w.mouthRadius, w.canExit, time / 1000);
+    } else if (flying) {
+      this.air.update(dt, info, view, state.tier);
+      this.air.highlight(w.mouthRadius, state.tier, time / 1000);
+      this.checkAirTouch(circles);
+    }
+    this.rockets.update(dt, info);
+    // лечение: под землёй быстро, в небе и космосе медленно, если несколько секунд никто не ранил
+    if (!state.stunned && state.hp < state.hpMax) {
+      if (w.y > w.headRadius * 1.1 && this.zone !== 'space') state.hp = Math.min(state.hpMax, state.hp + HP_REGEN * dt);
+      else if (flying && this.calm > AIR_REGEN_DELAY) state.hp = Math.min(state.hpMax, state.hp + AIR_REGEN * dt);
+    }
     // первая встреча с охраной: предупреждение (один раз, когда нет другого сообщения)
-    if (w.canExit && !(save.data.tutorial & TUTORIAL_GUARD) && state.toast.left <= 0) {
+    if (this.zone === 'ground' && w.canExit && !(save.data.tutorial & TUTORIAL_GUARD) && state.toast.left <= 0) {
       const seen = this.surface.items.some((it) => !it.dying && it.spec.behavior === 'guard' && Math.abs(it.x - w.x) < view.w * 0.6);
       if (seen) {
         save.patch({ tutorial: save.data.tutorial | TUTORIAL_GUARD });
         showToast('hint_guard', 5);
       }
+    }
+  }
+
+  /** Касание не по зубам (астероид, Луна): отбрасывает червя и бьёт, если нет неуязвимости. */
+  private checkAirTouch(circles: BodyCircle[]): void {
+    const w = this.worm;
+    if (state.stunned || this.cine || this.finale) return;
+    const it = this.air.touching(circles, w.mouthRadius);
+    if (!it) return;
+    w.kick(Math.atan2(w.y - it.y, w.x - it.x));
+    if (this.hpGrace <= 0) {
+      sfx.play('bump');
+      this.hurt(it.spec.touch ?? 10, w.x, w.y);
     }
   }
 
@@ -659,6 +987,7 @@ export class GameScene extends Phaser.Scene {
     if (state.stunned || this.hpGrace > 0) return;
     const w = this.worm;
     state.hp = Math.max(0, state.hp - dmg);
+    this.calm = 0;
     state.hpFlash = 0.4;
     this.hpGrace = HIT_GRACE;
     sfx.play('hit');
@@ -707,11 +1036,14 @@ export class GameScene extends Phaser.Scene {
     this.stars.forEach((st) => st.destroy());
     this.stars = [];
     state.hp = state.hpMax;
+    this.calm = 0;
     this.hpGrace = RESPAWN_GRACE;
     w.flash('happy', 600, this.time.now);
-    w.reset(w.x, 300 * w.scale, 0);
+    // на земле червь возвращается под землю, в небе и космосе остаётся на месте
+    if (this.zone === 'sky' || this.zone === 'space') w.reset(w.x, w.y, w.heading);
+    else w.reset(w.x, 300 * w.scale, 0);
     this.camReady = false;
-    this.surface.clearRockets();
+    this.rockets.clear();
     platform.gameplay(true);
     sfx.play('grow');
   }
@@ -719,6 +1051,7 @@ export class GameScene extends Phaser.Scene {
   // ---------- поверхность ----------
   private onExit(): void {
     const w = this.worm;
+    if (this.zone === 'space') return;
     sfx.play('jump');
     this.quest('jump', 1);
     if (!(save.data.tutorial & TUTORIAL_SURFACE)) {
@@ -734,6 +1067,7 @@ export class GameScene extends Phaser.Scene {
 
   private onEnter(): void {
     const w = this.worm;
+    if (this.zone === 'space') return;
     sfx.play('splash');
     this.fx.burst(w.x, 0, w.scale, { count: 14, frame: 'fx-dirt-chunk', colors: DIRT, speed: 360, life: 0.7, gravity: 1500, size: 20 });
     this.fx.burst(w.x, 0, w.scale, { count: 3, frame: 'fx-dust-poof', colors: [0xf0d9b5], speed: 200, life: 0.7, gravity: 0, size: 70 });
@@ -775,7 +1109,14 @@ export class GameScene extends Phaser.Scene {
         stunShown: state.stunShown,
         hpGrace: Math.round(this.hpGrace * 100) / 100,
         surface: this.surface.items.filter((it) => !it.dying).map((it) => it.spec.kind),
-        shots: this.surface.shots.length,
+        shots: this.rockets.shots.length,
+        zone: this.zone,
+        air: this.air.kinds(),
+        cine: this.cine ? this.cine.to : null,
+        ending: state.ending,
+        finale: this.finale,
+        flight: this.worm.flight,
+        end: save.data.end,
         gear: this.worm.gearInfo(),
         shopOpen: state.shopOpen,
         challenges: this.quests.list.map((c) => ({ ...c })),
@@ -817,6 +1158,13 @@ export class GameScene extends Phaser.Scene {
         // для проверок размер меняется сразу, а не плавно
         this.worm.scale = this.worm.targetScale;
         this.camReady = false;
+        // зона по тиру переключается сразу, без ролика (оборванный ролик ставит червя на место)
+        const wasCine = this.cine !== null;
+        this.cine = null;
+        const zn = zoneOf(state.tier);
+        if (zn !== this.zone) this.enterZone(zn, true);
+        if (wasCine && (zn === 'under' || zn === 'ground')) this.worm.reset(this.worm.x, 260 * this.worm.scale, 0);
+        if (this.quests.refresh(state.tier)) save.patch({ ch: this.quests.list });
       },
       autopilot: (on) => {
         this.autopilot = on;
@@ -836,6 +1184,11 @@ export class GameScene extends Phaser.Scene {
         const it = this.surface.place(kind, x, this.worm.scale);
         (window as unknown as { __test_it?: SurfaceItem }).__test_it = it;
         return { r: it.r, cy: it.cy, w: it.w, h: it.h };
+      },
+      placeAir: (kind: AirKind, x: number, y: number) => {
+        const it = this.air.place(kind, x, y);
+        (window as unknown as { __test_air?: AirItem }).__test_air = it;
+        return { r: it.r, w: it.w, h: it.h };
       },
       setHp: (n: number) => {
         state.hp = Math.max(0, Math.min(state.hpMax, n));

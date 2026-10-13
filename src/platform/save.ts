@@ -24,6 +24,8 @@ export interface SaveData {
   tutorial: number;
   /** Активные испытания (концепт, раздел 10). */
   ch: ChallengeState[];
+  /** Сколько раз игрок съел Землю (финал). */
+  end: number;
 }
 
 /** Биты обучения. */
@@ -37,7 +39,7 @@ export const TUTORIAL_GUARD = 64; // подсказка про технику о
 export const TUTORIAL_WINGS = 128; // подсказка про полёт на крыльях показана
 
 export function defaultSave(): SaveData {
-  return { v: 3, savedAt: 0, skin: DEFAULT_SKIN, skinChosen: false, tier: 1, growth: 0, coins: 0, up: { jump: 0, hp: 0, speed: 0 }, sound: true, tutorial: 0, ch: [] };
+  return { v: 3, savedAt: 0, skin: DEFAULT_SKIN, skinChosen: false, tier: 1, growth: 0, coins: 0, up: { jump: 0, hp: 0, speed: 0 }, sound: true, tutorial: 0, ch: [], end: 0 };
 }
 
 function num(v: unknown, def: number, min: number, max: number): number {
@@ -75,6 +77,7 @@ function sanitize(raw: unknown): SaveData | null {
     sound: r.sound !== false,
     tutorial: Math.round(num(r.tutorial, 0, 0, 255)),
     ch: sanitizeChallenges(r.ch),
+    end: Math.round(num(r.end, 0, 0, 99)),
   };
 }
 

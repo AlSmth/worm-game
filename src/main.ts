@@ -10,6 +10,7 @@ import { GameScene } from './scenes/GameScene';
 import { UIScene } from './scenes/UIScene';
 import { SelectScene } from './scenes/SelectScene';
 import { ShopScene } from './scenes/ShopScene';
+import { EndScene } from './scenes/EndScene';
 
 /**
  * Никаких системных меню, выделения, масштабирования щипком и прокрутки (пп. 1.6.1.8, 1.6.2.7, 1.10.2).
@@ -49,7 +50,7 @@ async function boot(): Promise<void> {
     fps: { target: 60, smoothStep: true },
     // колесо мыши игре не нужно, а Phaser по умолчанию гасит его и мешает масштабу страницы браузера (Ctrl+колесо)
     input: { activePointers: 3, mouse: { preventDefaultWheel: false } },
-    scene: [BootScene, GameScene, UIScene, SelectScene, ShopScene],
+    scene: [BootScene, GameScene, UIScene, SelectScene, ShopScene, EndScene],
   });
 
   // CSS-размер холста задаём сами: Phaser при нулевом зуме оставляет прежний

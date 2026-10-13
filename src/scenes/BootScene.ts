@@ -5,7 +5,7 @@ import { setAtlasInfo } from '../game/assets';
 import { makeTextures } from '../game/textures';
 
 /** Фоны зоны 1 (одиночные картинки, повторяющиеся плитки). */
-export const BACKGROUNDS = ['bg-z1-far', 'bg-z1-mid', 'bg-z1-near', 'bg-z1-edge', 'bg-z1-clouds', 'bg-z2-skyline', 'bg-z2-hills'];
+export const BACKGROUNDS = ['bg-z1-far', 'bg-z1-mid', 'bg-z1-near', 'bg-z1-edge', 'bg-z1-clouds', 'bg-z2-skyline', 'bg-z2-hills', 'bg-z4-stars-a', 'bg-z4-stars-b'];
 
 /** Загрузка графики и градиентов, затем запуск игры. */
 export class BootScene extends Phaser.Scene {
@@ -23,6 +23,8 @@ export class BootScene extends Phaser.Scene {
     this.load.atlas('treasure', 'assets/treasure.png', 'assets/treasure.json');
     this.load.atlas('fx', 'assets/fx.png', 'assets/fx.json');
     this.load.atlas('z2', 'assets/z2.png', 'assets/z2.json');
+    this.load.atlas('z3', 'assets/z3.png', 'assets/z3.json');
+    this.load.atlas('z4', 'assets/z4.png', 'assets/z4.json');
     for (const n of BACKGROUNDS) this.load.image(n, `assets/${n}.png`);
   }
 

@@ -25,6 +25,8 @@ export const state = {
   hp: 100,
   hpMax: 100,
   hpFlash: 0,
+  /** Финал: Земля съедена, показан экран концовки (игра стоит). */
+  ending: false,
   /** Червь оглушён (здоровье кончилось); stunShown — окно «Заново» уже открыто, игра стоит. */
   stunned: false,
   stunShown: false,

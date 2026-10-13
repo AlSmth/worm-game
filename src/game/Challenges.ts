@@ -1,4 +1,4 @@
-import { CHALLENGE_COUNT, makeChallenge, pickKind, type ChallengeKind, type ChallengeState } from '../data/challenges';
+import { CHALLENGE_COUNT, expiredKind, makeChallenge, pickKind, type ChallengeKind, type ChallengeState } from '../data/challenges';
 
 export interface ChallengeDone {
   kind: ChallengeKind;
@@ -21,7 +21,19 @@ export class Challenges {
       this.list.push(makeChallenge(pickKind(tier, this.list.map((c) => c.k)), tier));
       added = true;
     }
-    return added;
+    return this.refresh(tier) || added;
+  }
+
+  /** Заменить испытания, которые на этом тире уже не выполнить (после выхода в небо и космос). Возвращает true, если что-то заменено. */
+  refresh(tier: number): boolean {
+    let changed = false;
+    for (let i = 0; i < this.list.length; i++) {
+      if (!expiredKind(this.list[i].k, tier)) continue;
+      const taken = this.list.filter((_, j) => j !== i).map((c) => c.k);
+      this.list[i] = makeChallenge(pickKind(tier, taken), tier);
+      changed = true;
+    }
+    return changed;
   }
 
   /** Прибавить прогресс всем испытаниям этого вида; вернуть выполненные (они уже заменены новыми). */

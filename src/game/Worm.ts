@@ -110,6 +110,14 @@ export class Worm {
   upgrades: Upgrades = { jump: 0, hp: 0, speed: 0 };
   /** Можно ли выбраться на поверхность (открывается ростом, см. data/world.ts). */
   canExit = true;
+  /**
+   * Полёт (небо и космос, с 13-го тира): червь плывёт по воздуху и в пустоте, как по почве, без тяжести и прыжков. Предел вверх (потолок
+   * неба или космоса, отрицательный y), предел вниз и половина ширины арены задаёт сцена; крылья в полёте ускоряют поворот.
+   */
+  flight = false;
+  ceilY = -Infinity;
+  floorY = Infinity;
+  halfX: number | null = null;
   /** Оглушён: не плывёт и не слушается, падает, если был в воздухе. */
   stunned = false;
   onExit?: () => void;
@@ -299,6 +307,11 @@ export class Worm {
     return SWIM_SPEED * this.scale * (1 + SPEED_BONUS[this.upgrades.speed]);
   }
 
+  /** Червь над землёй: в прыжке или в полёте (в небе и космосе), крылья раскрыты. */
+  get airborne(): boolean {
+    return this.inAir || (this.flight && this.y < -this.headRadius * 0.5);
+  }
+
   /** Максимальная высота прыжка вверх (px мира). */
   get jumpHeight(): number {
     return JUMP_HEIGHT * this.scale * (1 + JUMP_BONUS[this.upgrades.jump]);
@@ -330,6 +343,12 @@ export class Worm {
     const count = Math.max(2, Math.ceil(L / rig.spacing) + 1);
     for (let k = 6; k < count && k < this.nodes.length; k += 6) out.push({ x: this.nodes[k].x, y: this.nodes[k].y, r: this.radii[k] * S * 0.9 });
     return out;
+  }
+
+  /** Отскок от твёрдого (астероид, Луна): курс разворачивается прочь от точки касания, скорость падает. */
+  kick(away: number): void {
+    this.heading = away;
+    this.speed *= 0.5;
   }
 
   /** Проглоченный кусок бежит по телу: мультяшное утолщение от головы к хвосту. */
@@ -375,8 +394,8 @@ export class Worm {
   private move(dt: number, steer: Steer): void {
     const S = this.scale;
     const swim = this.stunned ? 0 : this.swimSpeed;
-    const half = worldHalf(S) - this.headRadius * 1.4;
-    if (!this.inAir) {
+    const half = (this.halfX ?? worldHalf(S)) - this.headRadius * 1.4;
+    if (!this.inAir || this.flight) {
       let want: number | null = null;
       if (this.stunned) {
         want = null;
@@ -389,12 +408,13 @@ export class Worm {
       }
       if (want !== null) {
         const d = angleDiff(want, this.heading);
-        const maxTurn = TURN_RATE * dt;
+        const maxTurn = TURN_RATE * (this.flight ? 1 + 0.18 * this.upgrades.jump : 1) * dt;
         this.heading += Math.max(-maxTurn, Math.min(maxTurn, d));
       }
       this.speed += (swim - this.speed) * Math.min(1, 5 * dt);
       this.vx = Math.cos(this.heading) * this.speed;
       this.vy = Math.sin(this.heading) * this.speed;
+      const prevY = this.y;
       this.x += this.vx * dt;
       this.y += this.vy * dt;
 
@@ -406,12 +426,25 @@ export class Worm {
         this.x = half;
         if (Math.cos(this.heading) > 0) this.heading = Math.sin(this.heading) >= 0 ? Math.PI / 2 : -Math.PI / 2;
       }
-      const maxY = MAX_DEPTH * S;
+      const maxY = this.flight ? Math.min(this.floorY, MAX_DEPTH * S) : MAX_DEPTH * S;
       if (this.y > maxY) {
         this.y = maxY;
         if (Math.sin(this.heading) > 0) this.heading = Math.cos(this.heading) >= 0 ? 0 : Math.PI;
       }
-      if (!this.canExit) {
+      if (this.flight) {
+        // потолок неба или космоса: упираемся и скользим вдоль него
+        if (this.y < this.ceilY) {
+          this.y = this.ceilY;
+          if (Math.sin(this.heading) < 0) {
+            this.heading = Math.cos(this.heading) >= 0 ? 0 : Math.PI;
+            this.onBump?.();
+          }
+        }
+        this.inAir = false;
+        // у земли в небе: вылет из почвы и нырок в неё с брызгами земли, как у прыжка
+        if (prevY >= 0 && this.y < 0) this.onExit?.();
+        else if (prevY < 0 && this.y >= 0) this.onEnter?.();
+      } else if (!this.canExit) {
         // выход закрыт: упираемся в «корку» под травой и скользим вдоль неё
         const ceil = CEILING * S;
         if (this.y < ceil) {
@@ -666,10 +699,12 @@ export class Worm {
       const ax = n.x + ox * cn - oy * sn;
       const ay = n.y + ox * sn + oy * cn;
       const k = S / atlasScale('wings');
-      this.flapPhase += dt * (this.inAir ? 7 + 15 * this.flapK : this.showOff ? 9 : 6);
-      const amp = this.inAir ? 0.14 + 0.4 * this.flapK : this.showOff ? 0.38 : 0.14;
+      const up = this.airborne;
+      if (this.flight) this.flapK += ((up ? 0.5 + 0.4 * Math.min(1, this.speed / Math.max(1, this.swimSpeed)) : 0) - this.flapK) * Math.min(1, 4 * dt);
+      this.flapPhase += dt * (up ? 7 + 15 * this.flapK : this.showOff ? 9 : 6);
+      const amp = up ? 0.14 + 0.4 * this.flapK : this.showOff ? 0.38 : 0.14;
       // под землёй крылья прижаты к спине и меньше, в воздухе раскрываются (на пикировании складываются наполовину)
-      const openT = this.inAir ? (this.diving ? 0.5 : 1) : this.showOff ? 1 : 0;
+      const openT = up ? (this.diving && !this.flight ? 0.5 : 1) : this.showOff ? 1 : 0;
       this.wingOpen += (openT - this.wingOpen) * Math.min(1, 7 * dt);
       const fold = 1 - this.wingOpen;
       const foldRot = -0.85 * fold * nFace;

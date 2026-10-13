@@ -1,12 +1,15 @@
 import Phaser from 'phaser';
-import { worldHalf } from '../data/world';
+import { skyTop, spaceHalf, worldHalf, type Zone } from '../data/world';
+import { state } from '../core/state';
 import { atlasScale } from './assets';
 
 /**
- * Фон зоны 1: небо с облаками, кромка с травой, три слоя почвы с параллаксом, затемнение с глубиной и каменные стены
- * по краям карты. Рисунки лежат в design/zone-1-underground/background. Над землёй видны дальние дома и холмы зоны 2
- * (design/zone-2-surface/background): сверху видно, что ждёт червя, когда он вырастет. Почва не растёт вместе с червём: по мере роста камера
- * отъезжает, и земля становится мельче («сначала масштаб земли»). Всё рисуется только в видимой области.
+ * Фон: небо с облаками, кромка с травой, три слоя почвы с параллаксом, затемнение с глубиной и каменные стены по краям карты (зоны 1-2).
+ * Рисунки лежат в design/zone-1-underground/background. Над землёй видны дальние дома и холмы зоны 2 (design/zone-2-surface/background):
+ * сверху видно, что ждёт червя, когда он вырастет. Почва не растёт вместе с червём: по мере роста камера отъезжает, и земля становится
+ * мельче («сначала масштаб земли»). В небе (зона 3) цвет неба темнеет с высотой, над землёй плывут полосы облаков, на большой высоте
+ * проступают звёзды; в космосе (зона 4) только тёмная пустота и звёзды в два слоя параллакса, по краям арены светящиеся барьеры.
+ * Всё рисуется только в видимой области.
  */
 /** alpha: средний и ближний слои приглушены, чтобы червь и добыча читались на фоне. */
 const LAYERS: Array<{ key: string; depth: number; parallax: number; alpha: number }> = [
@@ -30,6 +33,49 @@ const SKYLINE_PARALLAX = 0.3;
 const HILLS_PARALLAX = 0.55;
 const GROUND_SINK = 8;
 
+/** Полосы облаков в небе: высота центра в долях высоты неба, параллакс. */
+const SKY_BANDS: Array<{ alt: number; par: number; alpha: number }> = [
+  { alt: 0.06, par: 0.1, alpha: 0.95 },
+  { alt: 0.16, par: 0.16, alpha: 0.9 },
+  { alt: 0.28, par: 0.22, alpha: 0.9 },
+  { alt: 0.42, par: 0.3, alpha: 0.8 },
+  { alt: 0.58, par: 0.38, alpha: 0.6 },
+];
+const BAND_FRAC = 0.3;
+/** Цвет неба по высоте (доля высоты неба): у земли голубой, выше синеет и темнеет к космосу. */
+const SKY_KEYS: Array<[number, number]> = [
+  [0, 0x3f9cff],
+  [0.3, 0x2d73e2],
+  [0.6, 0x1f3a96],
+  [0.85, 0x0f1750],
+  [1, 0x060a26],
+];
+const SPACE_COLOR = 0x050a1e;
+const SPACE_BARRIER = 0x1a2f7a;
+const SPACE_BARRIER_EDGE = 0x7fd0ff;
+
+function lerpColor(a: number, b: number, t: number): number {
+  const ar = (a >> 16) & 255;
+  const ag = (a >> 8) & 255;
+  const ab = a & 255;
+  const br = (b >> 16) & 255;
+  const bg = (b >> 8) & 255;
+  const bb = b & 255;
+  return (Math.round(ar + (br - ar) * t) << 16) | (Math.round(ag + (bg - ag) * t) << 8) | Math.round(ab + (bb - ab) * t);
+}
+
+export function skyColor(alt: number): number {
+  const a = Math.max(0, Math.min(1, alt));
+  for (let i = 1; i < SKY_KEYS.length; i++) {
+    if (a <= SKY_KEYS[i][0]) {
+      const [x0, c0] = SKY_KEYS[i - 1];
+      const [x1, c1] = SKY_KEYS[i];
+      return lerpColor(c0, c1, (a - x0) / (x1 - x0));
+    }
+  }
+  return SKY_KEYS[SKY_KEYS.length - 1][1];
+}
+
 export class WorldBackground {
   private sky: Phaser.GameObjects.Rectangle;
   private horizon: Phaser.GameObjects.Image;
@@ -43,11 +89,22 @@ export class WorldBackground {
   private walls: Phaser.GameObjects.TileSprite[] = [];
   private rims: Phaser.GameObjects.Rectangle[] = [];
   private edges: Phaser.GameObjects.Rectangle[] = [];
+  private bands: Phaser.GameObjects.TileSprite[] = [];
+  private spaceRect: Phaser.GameObjects.Rectangle;
+  private starsA: Phaser.GameObjects.TileSprite;
+  private starsB: Phaser.GameObjects.TileSprite;
+  private mode: Zone | 'init' = 'init';
 
-  constructor(scene: Phaser.Scene) {
+  constructor(private scene: Phaser.Scene) {
     this.sky = scene.add.rectangle(0, 0, 10, 10, 0x3f9cff).setOrigin(0, 0).setDepth(-100);
+    this.spaceRect = scene.add.rectangle(0, 0, 10, 10, SPACE_COLOR).setOrigin(0, 0).setDepth(-100).setVisible(false);
+    this.starsB = scene.add.tileSprite(0, 0, 10, 10, 'bg-z4-stars-b').setOrigin(0, 0).setDepth(-99.8).setVisible(false);
+    this.starsA = scene.add.tileSprite(0, 0, 10, 10, 'bg-z4-stars-a').setOrigin(0, 0).setDepth(-99.7).setVisible(false);
     this.horizon = scene.add.image(0, 0, 'bg-horizon').setOrigin(0, 0).setDepth(-99);
     this.clouds = scene.add.tileSprite(0, 0, 10, 256, 'bg-z1-clouds').setOrigin(0, 0).setDepth(-98.8);
+    for (let i = 0; i < SKY_BANDS.length; i++) {
+      this.bands.push(scene.add.tileSprite(0, 0, 10, 256, 'bg-z1-clouds').setOrigin(0, 0).setDepth(-98.9 + i * 0.01).setVisible(false));
+    }
     this.skyline = scene.add.tileSprite(0, 0, 10, SKYLINE_H, 'bg-z2-skyline').setOrigin(0, 0).setDepth(-98.6);
     this.hills = scene.add.tileSprite(0, 0, 10, HILLS_H, 'bg-z2-hills').setOrigin(0, 0).setDepth(-98.4);
     for (const l of LAYERS) this.layers.push(scene.add.tileSprite(0, 0, 10, 10, l.key).setOrigin(0, 0).setDepth(l.depth).setAlpha(l.alpha));
@@ -62,7 +119,7 @@ export class WorldBackground {
     }
   }
 
-  update(cam: Phaser.Cameras.Scene2D.Camera, S: number): void {
+  update(cam: Phaser.Cameras.Scene2D.Camera, S: number, zone: Zone = 'ground'): void {
     // cam.worldView Phaser пересчитывает уже после шага сцены, то есть он отстаёт на кадр, а у большого червя камера
     // за кадр уходит далеко. Поэтому видимую область считаем сами по актуальным scroll и zoom и берём запас в экранных пикселях.
     const vw = cam.width / cam.zoom;
@@ -73,18 +130,53 @@ export class WorldBackground {
     const top = cam.scrollY + cam.height / 2 - vh / 2 - margin;
     const bottom = top + vh + 2 * margin;
 
-    // небо над землёй: градиент и облака
+    this.setMode(zone);
+    if (zone === 'space') {
+      this.updateSpace(cam, left, top, width, bottom - top, S);
+      return;
+    }
+
+    // небо над землёй: градиент (в небе темнеет с высотой) и облака
+    const sky = zone === 'sky';
+    const topY = skyTop(S);
+    const centerY = cam.scrollY + cam.height / 2;
+    const alt = sky ? Math.max(0, Math.min(1, -centerY / topY)) : 0;
     const skyH = Math.max(0, Math.min(bottom, 0) - top);
     this.sky.setVisible(skyH > 0).setPosition(left, top).setSize(width, Math.max(1, skyH));
+    if (sky) {
+      const col = skyColor(alt);
+      this.sky.setFillStyle(col);
+      cam.setBackgroundColor(col);
+    }
     const hz = 1100 * S;
-    this.horizon.setVisible(bottom > -hz).setPosition(left, -hz).setDisplaySize(width, hz);
+    this.horizon.setVisible(bottom > -hz && alt < 0.2).setPosition(left, -hz).setDisplaySize(width, hz).setAlpha(sky ? Math.max(0, 1 - alt * 6) : 1);
+    // звёзды проступают на большой высоте (в космосе они всегда)
+    const starA = sky ? Math.max(0, Math.min(1, (alt - 0.5) / 0.35)) : 0;
+    this.drawStars(cam, left, top, width, bottom - top, starA);
     const cs = 1 / atlasScale('bg-z1-clouds');
-    const cloudH = 256 * cs;
-    const cloudTop = CLOUD_TOP * Math.max(1, S * 0.6);
-    this.clouds.setVisible(bottom > cloudTop && top < cloudTop + cloudH);
-    if (this.clouds.visible) {
-      this.clouds.setPosition(left, cloudTop).setSize(width, cloudH).setTileScale(cs, cs);
-      this.clouds.tilePositionX = (left * CLOUD_PARALLAX) / cs;
+    if (sky) {
+      // полосы облаков на разных высотах: размер привязан к размеру экрана, чтобы с отъездом камеры они не мельчали
+      const bh = BAND_FRAC * vh;
+      const ts = bh / 256;
+      for (let i = 0; i < SKY_BANDS.length; i++) {
+        const b = SKY_BANDS[i];
+        const y0 = -b.alt * topY - bh / 2;
+        const band = this.bands[i];
+        band.setVisible(bottom > y0 && top < y0 + bh);
+        if (band.visible) {
+          band.setPosition(left, y0).setSize(width, bh).setTileScale(ts, ts).setAlpha(b.alpha * Math.max(0, 1 - Math.max(0, alt - b.alt - 0.25) * 4));
+          band.tilePositionX = (left * b.par) / ts;
+        }
+      }
+      this.clouds.setVisible(false);
+    } else {
+      const cloudH = 256 * cs;
+      const cloudTop = CLOUD_TOP * Math.max(1, S * 0.6);
+      this.clouds.setVisible(bottom > cloudTop && top < cloudTop + cloudH);
+      if (this.clouds.visible) {
+        this.clouds.setPosition(left, cloudTop).setSize(width, cloudH).setTileScale(cs, cs);
+        this.clouds.tilePositionX = (left * CLOUD_PARALLAX) / cs;
+      }
     }
 
     // дальние дома и холмы над землёй
@@ -155,6 +247,69 @@ export class WorldBackground {
       const edge = this.edges[i];
       const ew = Math.max(8, 14 * S);
       edge.setVisible(w > 0).setPosition(i === 0 ? -half - ew : half, top).setSize(ew, Math.max(1, wallH));
+    }
+  }
+
+  /** Звёзды двумя слоями параллакса: на экране они всегда одного размера (1 px плитки = 1 px экрана), прозрачность alpha. */
+  private drawStars(cam: Phaser.Cameras.Scene2D.Camera, left: number, top: number, width: number, height: number, alpha: number): void {
+    const on = alpha > 0.01;
+    this.starsA.setVisible(on);
+    this.starsB.setVisible(on);
+    if (!on) return;
+    const ts = (state.layout.dpr || 1) / cam.zoom;
+    this.starsA.setPosition(left, top).setSize(width, height).setTileScale(ts, ts).setAlpha(alpha);
+    this.starsA.tilePositionX = (left * 0.05) / ts;
+    this.starsA.tilePositionY = (top * 0.05) / ts;
+    this.starsB.setPosition(left, top).setSize(width, height).setTileScale(ts * 1.6, ts * 1.6).setAlpha(alpha * 0.8);
+    this.starsB.tilePositionX = (left * 0.02) / (ts * 1.6);
+    this.starsB.tilePositionY = (top * 0.02) / (ts * 1.6);
+  }
+
+  /** Космос: тёмная пустота, звёзды, светящиеся барьеры по краям арены. Всё наземное скрыто. */
+  private updateSpace(cam: Phaser.Cameras.Scene2D.Camera, left: number, top: number, width: number, height: number, S: number): void {
+    cam.setBackgroundColor(SPACE_COLOR);
+    this.spaceRect.setVisible(true).setPosition(left, top).setSize(width, height);
+    this.drawStars(cam, left, top, width, height, 1);
+    const half = spaceHalf(S);
+    const right = left + width;
+    const bw = Math.max(1, 14 / cam.zoom);
+    for (let i = 0; i < 2; i++) {
+      const x = i === 0 ? -half : half;
+      const near = i === 0 ? left < x + bw * 6 : right > x - bw * 6;
+      this.rims[i].setVisible(near).setPosition(i === 0 ? x : x - bw * 6, top).setSize(bw * 6, Math.max(1, height));
+      this.edges[i].setVisible(near).setPosition(i === 0 ? x - bw : x, top).setSize(bw, Math.max(1, height));
+    }
+  }
+
+  /** Переключение режима: видимость и цвета слоёв, которые зависят от зоны. */
+  private setMode(zone: Zone): void {
+    if (this.mode === zone) return;
+    const prev = this.mode;
+    this.mode = zone;
+    const space = zone === 'space';
+    this.spaceRect.setVisible(space);
+    if (space) {
+      this.sky.setVisible(false);
+      this.horizon.setVisible(false);
+      this.clouds.setVisible(false);
+      this.skyline.setVisible(false);
+      this.hills.setVisible(false);
+      this.layers.forEach((l) => l.setVisible(false));
+      this.shade.setVisible(false);
+      this.deep.setVisible(false);
+      this.edge.setVisible(false);
+      this.walls.forEach((w) => w.setVisible(false));
+      this.bands.forEach((b) => b.setVisible(false));
+      this.rims.forEach((r) => r.setFillStyle(SPACE_BARRIER, 0.45));
+      this.edges.forEach((e) => e.setFillStyle(SPACE_BARRIER_EDGE, 1));
+    } else {
+      this.starsA.setVisible(false);
+      this.starsB.setVisible(false);
+      this.rims.forEach((r) => r.setFillStyle(0x120806, 0.6));
+      this.edges.forEach((e) => e.setFillStyle(0xd7dcec, 1));
+      if (zone !== 'sky') this.bands.forEach((b) => b.setVisible(false));
+      if (zone !== 'sky' || prev === 'init') this.sky.setFillStyle(0x3f9cff);
+      this.scene.cameras.main.setBackgroundColor(0x3f9cff);
     }
   }
 }

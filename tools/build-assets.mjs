@@ -37,6 +37,9 @@ const ATLASES = [
   { name: 'gear-plum', scale: 1, dirs: ['design/upgrades/armor/plum', 'design/upgrades/fins/plum'] },
   // зона 2 «Поверхность»: люди, машины, техника охраны, декор, дома
   { name: 'z2', scale: 1, dirs: ['design/zone-2-surface/people', 'design/zone-2-surface/vehicles', 'design/zone-2-surface/military', 'design/zone-2-surface/decor', 'design/zone-2-surface/houses'] },
+  // зона 3 «Небо»: самолёты и вертолёты; зона 4 «Космос»: спутники, станция, астероиды, Луна, Земля
+  { name: 'z3', scale: 1, dir: 'design/zone-3-sky/planes' },
+  { name: 'z4', scale: 1, dir: 'design/zone-4-space/objects' },
 ];
 
 /** Одиночные картинки без обрезки и упаковки (фоны и повторяющиеся плитки): PNG целиком, размер степень двойки. */
@@ -48,6 +51,8 @@ const SINGLES = [
   { name: 'bg-z1-clouds', file: 'design/zone-1-underground/background/bg-z1-clouds.svg', scale: 0.5 },
   { name: 'bg-z2-skyline', file: 'design/zone-2-surface/background/bg-z2-skyline.svg', scale: 1 },
   { name: 'bg-z2-hills', file: 'design/zone-2-surface/background/bg-z2-hills.svg', scale: 1 },
+  { name: 'bg-z4-stars-a', file: 'design/zone-4-space/background/bg-z4-stars-a.svg', scale: 1 },
+  { name: 'bg-z4-stars-b', file: 'design/zone-4-space/background/bg-z4-stars-b.svg', scale: 1 },
 ];
 
 const pot = (n) => 2 ** Math.ceil(Math.log2(Math.max(n, 1)));
